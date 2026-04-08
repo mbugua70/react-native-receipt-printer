@@ -10150,6 +10150,20 @@ __metadata:
   languageName: node
   linkType: hard
 
+"react-native-permissions@npm:^5.5.1":
+  version: 5.5.1
+  resolution: "react-native-permissions@npm:5.5.1"
+  peerDependencies:
+    react: "*"
+    react-native: "*"
+    react-native-windows: "*"
+  peerDependenciesMeta:
+    react-native-windows:
+      optional: true
+  checksum: 10c0/8ce0e05d1dbb7afd7b7e76db9769714b1a249b93aff8c47769ba91405558aab223a3116c9e9914f15297b53845908d4902ce9fe488336229a2213934cf5a42ed
+  languageName: node
+  linkType: hard
+
 "react-native-receipt-printer-example@workspace:example":
   version: 0.0.0-use.local
   resolution: "react-native-receipt-printer-example@workspace:example"
@@ -10196,12 +10210,15 @@ __metadata:
     react-native: "npm:0.83.0"
     react-native-bluetooth-classic: "npm:^1.73.0-rc.17"
     react-native-builder-bob: "npm:^0.40.13"
+    react-native-permissions: "npm:^5.5.1"
     release-it: "npm:^19.0.4"
     turbo: "npm:^2.5.6"
     typescript: "npm:^5.9.2"
   peerDependencies:
     react: "*"
     react-native: "*"
+    react-native-bluetooth-classic: "*"
+    react-native-permissions: "*"
   languageName: unknown
   linkType: soft
 
