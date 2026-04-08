@@ -165,5 +165,8 @@
       "release-it"
     ],
     "version": "0.57.2"
+  },
+  "dependencies": {
+    "react-native-bluetooth-classic": "^1.73.0-rc.17"
   }
 }
