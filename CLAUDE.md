@@ -59,8 +59,16 @@ The JS–native bridge works as follows:
 - **Yarn v4 workspaces** — root + `example/` app
 - **Turbo** (`turbo.json`) — `build:android` and `build:ios` tasks with caching
 - **Lefthook** — pre-commit runs ESLint + `tsc --noEmit` on staged files; commit-msg enforces Conventional Commits (Angular preset: `fix`, `feat`, `refactor`, `docs`, `test`, `chore`)
-- **react-native-builder-bob** — compiles `src/` to `lib/` (CommonJS, ESM, TypeScript declarations)
+- **react-native-builder-bob** — compiles `src/` to `lib/` (ESM + TypeScript declarations; no CommonJS target)
 
 ### TypeScript
 
 `tsconfig.json` uses strict mode with `bundler` module resolution. The path alias `react-native-receipt-printer` → `./src/index` lets the example app import the library source directly during development.
+
+### Current implementation state
+
+The library is scaffolded but not yet functional. All native modules currently expose only the placeholder `multiply(a, b)` stub from `create-react-native-library`. `react-native-bluetooth-classic` is installed as a runtime dependency but is not yet wired into any native or JS code. Actual Bluetooth discovery, connection, and ESC/POS printing logic still needs to be implemented.
+
+### Release
+
+`yarn release` runs `release-it` — bumps the version via Conventional Commits, tags the commit (`v<version>`), publishes to npm, and creates a GitHub release.
