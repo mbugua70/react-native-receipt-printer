@@ -1,5 +1,21 @@
-import ReceiptPrinter from './NativeReceiptPrinter';
+// ─── Layer 1: Raw functions ──────────────────────────────────────────────
+export {
+  requestBluetoothPermissions,
+  checkBluetoothPermissions,
+  type BluetoothPermissionResult,
+} from './bluetooth/BluetoothPermissions';
 
-export function multiply(a: number, b: number): number {
-  return ReceiptPrinter.multiply(a, b);
-}
+// ─── Layer 2: React hook ─────────────────────────────────────────────────
+export {
+  useBluetoothPermissions,
+  type BluetoothPermissionStatus,
+  type UseBluetoothPermissionsOptions,
+  type UseBluetoothPermissionsReturn,
+} from './hooks/useBluetoothPermissions';
+
+// ─── Layer 3: Context provider ───────────────────────────────────────────
+export {
+  BluetoothPermissionProvider,
+  useBluetoothPermissionsContext,
+  type BluetoothPermissionProviderProps,
+} from './bluetooth/BluetoothPermissionContext';
