@@ -52,10 +52,11 @@ function getRequiredPermissions(): Permission[] {
         : parseInt(String(Platform.Version), 10);
 
     if (apiLevel >= 31) {
+      // ACCESS_FINE_LOCATION is not needed on Android 12+ when BLUETOOTH_SCAN
+      // is declared with neverForLocation in the manifest.
       return [
         PERMISSIONS.ANDROID.BLUETOOTH_CONNECT,
         PERMISSIONS.ANDROID.BLUETOOTH_SCAN,
-        PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION,
       ];
     }
 
