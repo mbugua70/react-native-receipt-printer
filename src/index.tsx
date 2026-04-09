@@ -1,3 +1,22 @@
+// ─── Bluetooth manager ───────────────────────────────────────────────────
+export {
+  isBluetoothEnabled,
+  requestBluetoothEnabled,
+  ensureReady,
+  getBondedDevices,
+  startScan,
+  stopScan,
+  findDevice,
+  connect,
+  disconnect,
+  getConnectedDevice,
+  isConnected,
+  type BluetoothDevice,
+  type BluetoothReadyResult,
+  type DeviceQuery,
+  type ScanOptions,
+} from './bluetooth/BluetoothManager';
+
 // ─── Layer 1: Raw functions ──────────────────────────────────────────────
 export {
   requestBluetoothPermissions,
