@@ -10180,8 +10180,10 @@ __metadata:
     "@types/react": "npm:^19.2.0"
     react: "npm:19.2.0"
     react-native: "npm:0.83.0"
+    react-native-bluetooth-classic: "npm:^1.73.0-rc.17"
     react-native-builder-bob: "npm:^0.40.13"
     react-native-monorepo-config: "npm:^0.3.3"
+    react-native-permissions: "npm:^5.5.1"
   languageName: unknown
   linkType: soft
 
