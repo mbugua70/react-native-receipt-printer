@@ -173,6 +173,40 @@ const device = getConnectedDevice(); // BluetoothDevice | null
 const connected = isConnected();     // boolean
 ```
 
+#### Events
+
+Subscribe to real-time Bluetooth state changes — no polling required.
+
+```typescript
+import {
+  onConnectionChange,
+  onBluetoothStateChange,
+} from 'react-native-receipt-printer';
+
+// Fires immediately when a device connects or disconnects
+const unsub = onConnectionChange((event) => {
+  if (event.type === 'connected') {
+    console.log('Connected to:', event.device.name);
+  }
+  if (event.type === 'disconnected') {
+    console.log('Disconnected from:', event.device.name);
+  }
+});
+
+// Fires when the user turns Bluetooth on or off
+const unsubState = onBluetoothStateChange((event) => {
+  if (!event.enabled) {
+    console.log('Bluetooth was turned off');
+  }
+});
+
+// Always unsubscribe when done to prevent memory leaks
+unsub();
+unsubState();
+```
+
+> **Note:** If you use the `useBluetooth` hook or `BluetoothProvider`, events are already wired up internally — you don't need to call these manually. Use the raw event functions only when building custom state management outside of the hook.
+
 ---
 
 ### Layer 2 — React hooks
@@ -294,7 +328,7 @@ function PrinterStatus() {
 - [x] Bluetooth radio state management
 - [x] Device discovery (bonded + scan)
 - [x] Connection management
-- [ ] `BluetoothEvents` — real-time connection drop and radio state change events
+- [x] `BluetoothEvents` — real-time connection drop and radio state change events
 - [ ] `usePrinter` hook
 - [ ] ESC/POS encoder
 - [ ] Dynamic receipt builder (backend JSON → print commands)
