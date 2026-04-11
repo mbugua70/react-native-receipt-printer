@@ -13,6 +13,10 @@ import {
   type DeviceQuery,
   type ScanOptions,
 } from '../bluetooth/BluetoothManager';
+import {
+  onConnectionChange,
+  onBluetoothStateChange,
+} from '../bluetooth/BluetoothEvents';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -131,6 +135,37 @@ export function useBluetooth(): UseBluetoothReturn {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+    };
+  }, []);
+
+  // ── Event listeners ─────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    // When a device connects or disconnects outside our control — e.g. the
+    // printer powers off — update connectedDevice state immediately.
+    const unsubConnection = onConnectionChange((event) => {
+      if (!mountedRef.current) return;
+      if (event.type === 'connected') {
+        setConnectedDevice(event.device);
+      } else {
+        setConnectedDevice(null);
+      }
+    });
+
+    // When the BT radio is turned off — mark as not ready so the UI
+    // knows to prompt the user to turn Bluetooth back on.
+    const unsubState = onBluetoothStateChange((event) => {
+      if (!mountedRef.current) return;
+      if (!event.enabled) {
+        setIsReady(false);
+        setReadyError('bluetooth_disabled');
+        setConnectedDevice(null);
+      }
+    });
+
+    return () => {
+      unsubConnection();
+      unsubState();
     };
   }, []);
 

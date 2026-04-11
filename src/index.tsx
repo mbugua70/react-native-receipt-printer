@@ -1,3 +1,11 @@
+// ─── Bluetooth events ────────────────────────────────────────────────────
+export {
+  onConnectionChange,
+  onBluetoothStateChange,
+  type ConnectionChangeEvent,
+  type BluetoothStateChangeEvent,
+} from './bluetooth/BluetoothEvents';
+
 // ─── Bluetooth manager ───────────────────────────────────────────────────
 export {
   isBluetoothEnabled,
