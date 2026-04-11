@@ -38,9 +38,15 @@ export {
   type BluetoothReadyError,
 } from './hooks/useBluetooth';
 
-// ─── Layer 3: Context provider ───────────────────────────────────────────
+// ─── Layer 3: Context providers ──────────────────────────────────────────
 export {
   BluetoothPermissionProvider,
   useBluetoothPermissionsContext,
   type BluetoothPermissionProviderProps,
 } from './bluetooth/BluetoothPermissionContext';
+
+export {
+  BluetoothProvider,
+  useBluetoothContext,
+  type BluetoothProviderProps,
+} from './bluetooth/BluetoothContext';
