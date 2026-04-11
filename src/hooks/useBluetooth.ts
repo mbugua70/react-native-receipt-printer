@@ -152,14 +152,24 @@ export function useBluetooth(): UseBluetoothReturn {
       }
     });
 
-    // When the BT radio is turned off — mark as not ready so the UI
-    // knows to prompt the user to turn Bluetooth back on.
-    const unsubState = onBluetoothStateChange((event) => {
+    // When the BT radio changes state — update readiness accordingly.
+    const unsubState = onBluetoothStateChange(async (event) => {
       if (!mountedRef.current) return;
+
       if (!event.enabled) {
+        // BT turned off — mark not ready, clear connection
         setIsReady(false);
         setReadyError('bluetooth_disabled');
         setConnectedDevice(null);
+      } else {
+        // BT turned back on — automatically re-check readiness so
+        // the UI reflects the new state without the user tapping anything
+        const result = await ensureReady();
+        if (!mountedRef.current) return;
+        if (result.ready) {
+          setIsReady(true);
+          setReadyError(null);
+        }
       }
     });
 
