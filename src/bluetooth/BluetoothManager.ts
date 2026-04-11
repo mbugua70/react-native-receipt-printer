@@ -159,6 +159,7 @@ export async function startScan(
   });
 
   try {
+    //  The actual trigger to start our bluetooth scan
     await RNBluetoothClassic.startDiscovery();
 
     await new Promise<void>((resolve) => setTimeout(resolve, timeoutMs));

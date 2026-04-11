@@ -24,13 +24,19 @@ export {
   type BluetoothPermissionResult,
 } from './bluetooth/BluetoothPermissions';
 
-// ─── Layer 2: React hook ─────────────────────────────────────────────────
+// ─── Layer 2: React hooks ────────────────────────────────────────────────
 export {
   useBluetoothPermissions,
   type BluetoothPermissionStatus,
   type UseBluetoothPermissionsOptions,
   type UseBluetoothPermissionsReturn,
 } from './hooks/useBluetoothPermissions';
+
+export {
+  useBluetooth,
+  type UseBluetoothReturn,
+  type BluetoothReadyError,
+} from './hooks/useBluetooth';
 
 // ─── Layer 3: Context provider ───────────────────────────────────────────
 export {
