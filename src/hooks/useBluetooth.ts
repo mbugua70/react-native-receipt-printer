@@ -138,6 +138,9 @@ export function useBluetooth(): UseBluetoothReturn {
     };
   }, []);
 
+  // Guard against concurrent ensureReady() calls triggered by rapid BT toggles
+  const isCheckingReadyRef = useRef(false);
+
   // ── Event listeners ─────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -162,13 +165,24 @@ export function useBluetooth(): UseBluetoothReturn {
         setReadyError('bluetooth_disabled');
         setConnectedDevice(null);
       } else {
-        // BT turned back on — automatically re-check readiness so
-        // the UI reflects the new state without the user tapping anything
-        const result = await ensureReady();
-        if (!mountedRef.current) return;
-        if (result.ready) {
-          setIsReady(true);
-          setReadyError(null);
+        // BT turned back on — re-check readiness automatically.
+        // Guard prevents concurrent calls if BT is toggled rapidly.
+        if (isCheckingReadyRef.current) return;
+        isCheckingReadyRef.current = true;
+        try {
+          const result = await ensureReady();
+          if (!mountedRef.current) return;
+          if (result.ready) {
+            setIsReady(true);
+            setReadyError(null);
+          } else {
+            setIsReady(false);
+            setReadyError(result.reason as BluetoothReadyError);
+          }
+        } catch {
+          // ensureReady failed — leave existing state, user can retry manually
+        } finally {
+          isCheckingReadyRef.current = false;
         }
       }
     });
