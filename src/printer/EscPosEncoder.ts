@@ -243,29 +243,104 @@ export function encode(data: ReceiptData): string {
   return output;
 }
 
-// Encodes a single line — logic added in the next chunk.
-// All constants (LF, ALIGN_*, BOLD_*, CUT, etc.) are used here once
-// the switch cases are filled in.
+// ─── encodeLine — dispatch by type ───────────────────────────────────────────
+//
+// Called once per item in data.lines. Routes to the right helper based on
+// the `type` field of the line object.
+
 function encodeLine(
-  _line: ReceiptLine,
-  _size: ReturnType<typeof getSizeCommands>,
-  _widthCfg: ReturnType<typeof getWidthConfig>
+  line: ReceiptLine,
+  size: ReturnType<typeof getSizeCommands>,
+  widthCfg: ReturnType<typeof getWidthConfig>
 ): string {
-  return '';
+  switch (line.type) {
+    case 'text':
+      return encodeText(line, size, widthCfg);
+
+    case 'divider': {
+      // Fill the full paper width with a repeated character, then newline.
+      const char = line.char ?? '-';
+      return char.repeat(widthCfg.dividerLength) + LF;
+    }
+
+    case 'spacer': {
+      // Emit N blank lines (each LF advances one line on the printer).
+      const count = line.lines ?? 1;
+      return LF.repeat(count);
+    }
+
+    case 'qrcode': {
+      // Center the QR block, then restore left alignment afterward.
+      return ALIGN_CENTER + buildQrCommands(line.data) + LF + ALIGN_LEFT;
+    }
+
+    case 'cut':
+      return CUT;
+  }
 }
 
-// Referenced here so TS/ESLint doesn't flag them as unused before
-// the next chunk fills in encodeLine.
-// Temporary reference to prevent unused-variable errors before next chunk
-// fills in encodeLine. Remove once all constants are used in the switch.
-export const _unusedUntilNextChunk = {
-  LF,
-  ALIGN_LEFT,
-  ALIGN_CENTER,
-  ALIGN_RIGHT,
-  BOLD_ON,
-  BOLD_OFF,
-  CUT,
-  buildQrCommands,
-  wrapWords,
-};
+// ─── encodeText ───────────────────────────────────────────────────────────────
+//
+// Handles the 'text' line type. There are two layouts:
+//
+//   Two-column  — preText + content supplied → label on left, value on right.
+//                 e.g. "Fare:                 KES 500"
+//
+//   Full-width  — only content supplied → fills the line, respects alignment.
+//                 At large size the text is word-wrapped to fit charsLarge.
+//
+// Command order the printer expects:
+//   [size] [alignment] [bold?] <text> \n [reset bold] [reset size+align]
+//
+// Resetting after each line keeps lines independent — a bold header won't
+// bleed into the next line if the caller forgets to turn bold off.
+
+function encodeText(
+  line: TextLine,
+  size: SizeCommands,
+  widthCfg: WidthConfig
+): string {
+  const isLarge = line.size === 'large';
+  const isBold = line.bold === true;
+  const align = line.align ?? 'left';
+
+  // How many characters fit on one line at the chosen size
+  const charsPerLine = isLarge ? widthCfg.charsLarge : widthCfg.charsPerLine;
+
+  let alignCmd = ALIGN_LEFT;
+  if (align === 'center') alignCmd = ALIGN_CENTER;
+  else if (align === 'right') alignCmd = ALIGN_RIGHT;
+
+  const sizeCmd = isLarge ? size.large : size.normal;
+  const boldStart = isBold ? BOLD_ON : '';
+  const boldEnd = isBold ? BOLD_OFF : '';
+
+  // Preamble — set size, alignment, bold before any text
+  let result = sizeCmd + alignCmd + boldStart;
+
+  if (line.preText !== undefined && line.content !== undefined) {
+    // ── Two-column row ──────────────────────────────────────────────────────
+    // Pad the space between label and value so the value lands at the right
+    // edge of the paper.  If the two strings are already too long to fit,
+    // keep at least one space between them.
+    const gap = charsPerLine - line.preText.length - line.content.length;
+    const row = line.preText + ' '.repeat(Math.max(1, gap)) + line.content;
+    result += row + LF;
+  } else {
+    // ── Single-value row ────────────────────────────────────────────────────
+    const text = line.content ?? '';
+
+    if (isLarge && text.length > charsPerLine) {
+      // Word-wrap long text at large size so it doesn't get cut off.
+      const wrapped = wrapWords(text, charsPerLine);
+      result += wrapped.join(LF) + LF;
+    } else {
+      result += text + LF;
+    }
+  }
+
+  // Reset bold, size, and alignment so the next line starts clean.
+  result += boldEnd + size.normal + ALIGN_LEFT;
+
+  return result;
+}
