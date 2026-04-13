@@ -25,6 +25,14 @@ export {
   type ScanOptions,
 } from './bluetooth/BluetoothManager';
 
+// ─── Printer ─────────────────────────────────────────────────────────────
+export {
+  encode,
+  type ReceiptData,
+  type ReceiptLine,
+} from './printer/EscPosEncoder';
+export { ReceiptBuilder } from './printer/ReceiptBuilder';
+
 // ─── Layer 1: Raw functions ──────────────────────────────────────────────
 export {
   requestBluetoothPermissions,
