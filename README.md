@@ -19,6 +19,52 @@ A React Native library for thermal receipt printing over Bluetooth, with built-i
 
 ---
 
+## 📋 Requirements
+
+### React Native
+
+| Requirement | Version |
+|---|---|
+| React Native | 0.83.0+ (New Architecture / TurboModules) |
+| React | 19.2.0+ |
+
+This library uses the **New Architecture** (TurboModules + JSI). The old architecture (Bridge) is not supported.
+
+### Android
+
+| Requirement | Version |
+|---|---|
+| Minimum SDK | API 24 (Android 7.0 Nougat) |
+| Target SDK | API 36 (Android 16) |
+| Compile SDK | API 36 |
+| Kotlin | 2.1.20+ |
+
+**Bluetooth permission behaviour by Android version:**
+
+| Android version | API level | Permissions required |
+|---|---|---|
+| Android 12+ | API 31+ | `BLUETOOTH_CONNECT`, `BLUETOOTH_SCAN` |
+| Android 11 and below | API ≤ 30 | `BLUETOOTH`, `BLUETOOTH_ADMIN`, `ACCESS_FINE_LOCATION` |
+
+The library handles both automatically — you just call `requestBluetoothPermissions()` or `ensureReady()`.
+
+### iOS
+
+| Requirement | Version |
+|---|---|
+| Minimum deployment target | iOS 15.1 |
+
+`NSBluetoothAlwaysUsageDescription` is required in `Info.plist` (see [iOS setup](#ios-setup)).
+
+### Peer dependencies
+
+| Package | Version |
+|---|---|
+| `react-native-permissions` | ^5.5.1 |
+| `react-native-bluetooth-classic` | ^1.73.0-rc.17 |
+
+---
+
 ## 📦 Installation
 
 Install the library along with its peer dependencies:
