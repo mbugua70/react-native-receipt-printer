@@ -4,21 +4,18 @@ A React Native library for thermal receipt printing over Bluetooth, with built-i
 
 ---
 
-## 🚧 Status
-
-Work in progress. Bluetooth permission and connection layers are complete. Receipt printing is coming next.
-
----
-
 ## ✨ Features
 
 - **Bluetooth permissions** — cross-platform, Android 12+ and legacy Android, iOS. Fully handled with one call.
 - **Three-layer API** — raw functions, React hooks, and Context providers. Pick the level that fits your app.
 - **Device discovery** — scan for nearby devices or list already-paired ones.
 - **Connection management** — connect, disconnect, and track connection state reactively.
-- **ESC/POS receipt printing** — coming soon
-- **Dynamic receipt builder** — backend-driven receipt format (JSON → print commands) — coming soon
-- **58mm / 80mm printer support** — coming soon
+- **ESC/POS receipt encoding** — supports text, dividers, spacers, QR codes, and paper cut. 58mm and 80mm paper widths.
+- **Fluent receipt builder** — construct receipts with chainable methods or pass a JSON structure from your backend.
+- **Print queue** — jobs are processed one at a time. No corrupted output from concurrent prints.
+- **Retry logic** — automatically retries failed writes before giving up. Configurable per print call.
+- **Print status events** — subscribe to `sending`, `done`, and `error` events in real time.
+- **`usePrinter` hook** — `isPrinting`, `status`, and `error` state wired up automatically.
 
 ---
 
@@ -81,9 +78,176 @@ Follow each peer dependency's native setup guide for additional configuration:
 
 ---
 
-## 🔌 API
+## 🖨️ Printing
 
-The library exposes three layers. Pick the one that fits your use case.
+### Building a receipt
+
+Use `ReceiptBuilder` to construct a receipt with chainable methods:
+
+```ts
+import { ReceiptBuilder, encode } from 'react-native-receipt-printer';
+
+const receipt = new ReceiptBuilder({ paperWidth: 58 })
+  .header('ACME RIDES')
+  .divider()
+  .row('Passenger:', 'John Doe')
+  .row('Fare:', 'KES 500')
+  .row('Date:', '2026-04-14')
+  .divider()
+  .qrCode('https://acme.com/receipt/123')
+  .spacer(2)
+  .cut()
+  .build();
+```
+
+| Method | Description | Defaults |
+|---|---|---|
+| `.header(title, options?)` | Large bold centered title | `align: center`, `bold: true` |
+| `.row(label, value)` | Two-column row — label left, value right | |
+| `.text(content, options?)` | Single line of text | `align: left`, `size: normal` |
+| `.divider(options?)` | Horizontal rule | `char: '-'` |
+| `.spacer(lines?)` | Blank lines | `lines: 1` |
+| `.qrCode(data)` | Centered QR code | |
+| `.cut()` | Paper cut — always last | |
+| `.build()` | Returns `ReceiptData` ready for `encode()` | |
+
+Options you can override on `.header()` and `.text()`:
+
+```ts
+.header('ACME RIDES', { align: 'left', bold: false })
+.text('Note', { align: 'center', size: 'large', bold: true })
+```
+
+### Backend-driven receipts
+
+If your backend returns receipt data, pass it directly to `encode()` — no builder needed:
+
+```ts
+const data = await fetch('/api/receipt/123').then(r => r.json());
+// data is already ReceiptData shape:
+// { paperWidth: 58, lines: [ { type: 'text', ... }, ... ] }
+
+encode(data); // → raw ESC/POS string
+```
+
+### Printing
+
+```ts
+import { connect, print } from 'react-native-receipt-printer';
+
+await connect('00:11:22:AA:BB:CC');
+await print(receipt);                               // 1 copy, 2 retries
+await print(receipt, { copies: 2 });               // 2 copies
+await print(receipt, { copies: 1, retries: 5 });   // up to 5 retries
+await print(receipt, { copies: 1, retries: 0 });   // no retries
+```
+
+`PrintOptions`:
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `copies` | `number` | `1` | How many receipts to print |
+| `retries` | `number` | `2` | How many times to retry a failed write |
+| `retryDelayMs` | `number` | `500` | Milliseconds between retry attempts |
+
+### `usePrinter` hook
+
+The recommended way to print from a React component:
+
+```tsx
+import { usePrinter } from 'react-native-receipt-printer';
+
+function PrintButton({ receipt }) {
+  const { print, isPrinting, status, error } = usePrinter();
+
+  return (
+    <>
+      <Button
+        title={isPrinting ? 'Printing...' : 'Print'}
+        onPress={() => print(receipt)}
+        disabled={isPrinting}
+      />
+      <Text>Status: {status}</Text>
+      {error && <Text style={{ color: 'red' }}>{error.message}</Text>}
+    </>
+  );
+}
+```
+
+| Value | Type | Description |
+|---|---|---|
+| `print(data, options?)` | `function` | Send a receipt to the print queue |
+| `isPrinting` | `boolean` | `true` while the job is in flight |
+| `status` | `'idle' \| 'sending' \| 'done' \| 'error'` | Fine-grained current state |
+| `error` | `Error \| null` | Last error, or `null` if no error |
+
+### Print queue
+
+Jobs are always processed one at a time — safe to call `print()` or `enqueue()` multiple times without worrying about concurrent writes corrupting the output.
+
+```ts
+import { enqueue, clearQueue, getQueueLength } from 'react-native-receipt-printer';
+
+// Add jobs — processed in order
+enqueue(customerReceipt);
+enqueue(driverReceipt, { copies: 2 });
+
+// How many jobs are waiting (not counting the one currently printing)
+getQueueLength();
+
+// Cancel all pending jobs (the current job finishes normally)
+clearQueue();
+```
+
+### Print status events
+
+Subscribe anywhere in your app to get real-time updates:
+
+```ts
+import { onPrintStatus } from 'react-native-receipt-printer';
+
+const unsubscribe = onPrintStatus((event) => {
+  if (event.status === 'sending') {
+    console.log(`Sending copy ${event.copy} of ${event.totalCopies}...`);
+  }
+  if (event.status === 'done') {
+    console.log(`Copy ${event.copy} printed successfully.`);
+  }
+  if (event.status === 'error') {
+    console.log(`Copy ${event.copy} failed: ${event.error.message}`);
+  }
+});
+
+// Unsubscribe when done (e.g. in useEffect cleanup)
+unsubscribe();
+```
+
+### Error handling
+
+```ts
+import {
+  NotConnectedError,
+  PrintError,
+} from 'react-native-receipt-printer';
+
+try {
+  await print(receipt);
+} catch (err) {
+  if (err instanceof NotConnectedError) {
+    // no device connected — show "connect to a printer" UI
+  }
+  if (err instanceof PrintError) {
+    // write failed after all retries — err.cause has the underlying error
+    console.log(err.cause);
+  }
+}
+```
+
+---
+
+## 🔌 Bluetooth API
+
+The library exposes three layers for Bluetooth. Pick the one that fits your use case.
 
 ---
 
@@ -173,7 +337,7 @@ const device = getConnectedDevice(); // BluetoothDevice | null
 const connected = isConnected();     // boolean
 ```
 
-#### Events
+#### Bluetooth events
 
 Subscribe to real-time Bluetooth state changes — no polling required.
 
@@ -183,35 +347,25 @@ import {
   onBluetoothStateChange,
 } from 'react-native-receipt-printer';
 
-// Fires immediately when a device connects or disconnects
 const unsub = onConnectionChange((event) => {
-  if (event.type === 'connected') {
-    console.log('Connected to:', event.device.name);
-  }
-  if (event.type === 'disconnected') {
-    console.log('Disconnected from:', event.device.name);
-  }
+  if (event.type === 'connected')    console.log('Connected to:', event.device.name);
+  if (event.type === 'disconnected') console.log('Disconnected');
 });
 
-// Fires when the user turns Bluetooth on or off
 const unsubState = onBluetoothStateChange((event) => {
-  if (!event.enabled) {
-    console.log('Bluetooth was turned off');
-  }
+  if (!event.enabled) console.log('Bluetooth was turned off');
 });
 
-// Always unsubscribe when done to prevent memory leaks
+// Always unsubscribe when done
 unsub();
 unsubState();
 ```
 
-> **Note:** If you use the `useBluetooth` hook or `BluetoothProvider`, events are already wired up internally — you don't need to call these manually. Use the raw event functions only when building custom state management outside of the hook.
+> **Note:** If you use the `useBluetooth` hook or `BluetoothProvider`, events are already wired up internally.
 
 ---
 
 ### Layer 2 — React hooks
-
-Wraps the raw functions into reactive state. Recommended for most apps.
 
 #### `useBluetoothPermissions`
 
@@ -296,7 +450,6 @@ import {
   useBluetoothContext,
 } from 'react-native-receipt-printer';
 
-// Wrap your app once at the root
 export default function App() {
   return (
     <BluetoothPermissionProvider requestOnMount>
@@ -307,13 +460,6 @@ export default function App() {
   );
 }
 
-// Read shared permission state anywhere inside
-function PermissionStatus() {
-  const { granted, status } = useBluetoothPermissionsContext();
-  return <Text>Bluetooth: {status}</Text>;
-}
-
-// Read shared Bluetooth state anywhere inside
 function PrinterStatus() {
   const { isConnected, connectedDevice } = useBluetoothContext();
   return <Text>{isConnected ? connectedDevice?.name : 'Not connected'}</Text>;
@@ -328,11 +474,15 @@ function PrinterStatus() {
 - [x] Bluetooth radio state management
 - [x] Device discovery (bonded + scan)
 - [x] Connection management
-- [x] `BluetoothEvents` — real-time connection drop and radio state change events
-- [ ] `usePrinter` hook
-- [ ] ESC/POS encoder
-- [ ] Dynamic receipt builder (backend JSON → print commands)
-- [ ] 58mm / 80mm paper width support
+- [x] Bluetooth events — connection and radio state changes
+- [x] ESC/POS encoder — text, dividers, spacers, QR codes, paper cut
+- [x] 58mm / 80mm paper width support
+- [x] Fluent receipt builder
+- [x] `print()` with copies support
+- [x] Print queue — serial job processing
+- [x] Retry logic — automatic retries with configurable delay
+- [x] Print status events — `sending`, `done`, `error`
+- [x] `usePrinter` hook — `isPrinting`, `status`, `error`
 - [ ] Receipt templates
 
 ---
