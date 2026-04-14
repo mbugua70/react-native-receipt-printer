@@ -32,6 +32,13 @@ export {
   type ReceiptLine,
 } from './printer/EscPosEncoder';
 export { ReceiptBuilder } from './printer/ReceiptBuilder';
+export {
+  enqueue,
+  getQueueLength,
+  isProcessing,
+  clearQueue,
+} from './printer/PrintQueue';
+export { usePrinter, type UsePrinterReturn } from './hooks/usePrinter';
 
 // ─── Layer 1: Raw functions ──────────────────────────────────────────────
 export {

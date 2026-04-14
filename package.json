@@ -66,8 +66,10 @@
     "@react-native/babel-preset": "0.83.0",
     "@react-native/eslint-config": "0.83.0",
     "@release-it/conventional-changelog": "^10.0.1",
+    "@testing-library/react-native": "^13.3.3",
     "@types/jest": "^29.5.14",
     "@types/react": "^19.2.0",
+    "@types/react-test-renderer": "^19",
     "commitlint": "^19.8.1",
     "del-cli": "^6.0.0",
     "eslint": "^9.35.0",
@@ -81,6 +83,7 @@
     "react-native-bluetooth-classic": "^1.73.0-rc.17",
     "react-native-builder-bob": "^0.40.13",
     "react-native-permissions": "^5.5.1",
+    "react-test-renderer": "19.2.0",
     "release-it": "^19.0.4",
     "turbo": "^2.5.6",
     "typescript": "^5.9.2"
