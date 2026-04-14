@@ -15,8 +15,8 @@ export class NotConnectedError extends Error {
 }
 
 /**
- * Thrown when `print()` fails to write data to the connected device.
- * Wraps the underlying error from the Bluetooth layer.
+ * Thrown when `print()` fails to write data to the connected device after
+ * all retry attempts are exhausted. Wraps the last underlying error.
  */
 export class PrintError extends Error {
   readonly cause: unknown;
@@ -28,17 +28,46 @@ export class PrintError extends Error {
   }
 }
 
+// ─── Options ──────────────────────────────────────────────────────────────────
+
+export type PrintOptions = {
+  /**
+   * How many receipts to print.
+   * Default: 1.
+   */
+  copies?: number;
+
+  /**
+   * How many times to retry a failed write before giving up.
+   * Default: 2 — meaning up to 3 total attempts per copy.
+   * Set to 0 to disable retries entirely.
+   */
+  retries?: number;
+
+  /**
+   * How long to wait between retry attempts in milliseconds.
+   * Default: 500ms — gives the printer time to recover.
+   */
+  retryDelayMs?: number;
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // ─── print() ──────────────────────────────────────────────────────────────────
 
 /**
  * Encode a receipt and write it to the connected Bluetooth printer.
  *
  * - Requires an active connection — call `connect()` before printing.
- * - `copies` controls how many times the receipt is printed (default: 1).
+ * - Retries failed writes automatically before giving up.
  * - Each copy is sent as a separate write to the device.
  *
  * @throws {NotConnectedError} if no device is connected
- * @throws {PrintError}        if the write to the device fails
+ * @throws {PrintError}        if all retry attempts fail
  *
  * @example
  * ```ts
@@ -50,14 +79,18 @@ export class PrintError extends Error {
  *   .cut()
  *   .build();
  *
- * await print(receipt);          // 1 copy
- * await print(receipt, 2);       // 2 copies
+ * await print(receipt);                              // 1 copy, 2 retries
+ * await print(receipt, { copies: 2 });              // 2 copies, 2 retries
+ * await print(receipt, { copies: 1, retries: 5 });  // 1 copy, up to 5 retries
+ * await print(receipt, { copies: 1, retries: 0 });  // 1 copy, no retries
  * ```
  */
 export async function print(
   data: ReceiptData,
-  copies: number = 1
+  options: PrintOptions = {}
 ): Promise<void> {
+  const { copies = 1, retries = 2, retryDelayMs = 500 } = options;
+
   const device = getConnectedDevice();
 
   if (!device) {
@@ -66,13 +99,31 @@ export async function print(
 
   const encoded = encode(data);
 
-  for (let i = 0; i < copies; i++) {
-    try {
-      await device.write(encoded);
-    } catch (err) {
+  for (let copy = 0; copy < copies; copy++) {
+    let lastError: unknown;
+
+    // attempt 0 is the first try, attempts 1..retries are the retries
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        await device.write(encoded);
+        lastError = undefined;
+        break; // success — move on to the next copy
+      } catch (err) {
+        lastError = err;
+
+        const isLastAttempt = attempt === retries;
+        if (!isLastAttempt) {
+          await delay(retryDelayMs);
+        }
+      }
+    }
+
+    if (lastError !== undefined) {
       throw new PrintError(
-        `Failed to write to printer on copy ${i + 1} of ${copies}.`,
-        err
+        `Failed to print copy ${copy + 1} of ${copies} after ${
+          retries + 1
+        } attempt(s).`,
+        lastError
       );
     }
   }

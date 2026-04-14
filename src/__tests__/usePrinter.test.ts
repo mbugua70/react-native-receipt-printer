@@ -111,15 +111,18 @@ describe('usePrinter', () => {
     expect(result.current.error).toBeNull();
   });
 
-  it('passes copies to enqueue', async () => {
+  it('passes options to enqueue', async () => {
     mockEnqueue.mockResolvedValue(undefined);
 
     const { result } = renderHook(() => usePrinter());
 
     await act(async () => {
-      await result.current.print(receipt, 3);
+      await result.current.print(receipt, { copies: 3, retries: 1 });
     });
 
-    expect(mockEnqueue).toHaveBeenCalledWith(receipt, 3);
+    expect(mockEnqueue).toHaveBeenCalledWith(receipt, {
+      copies: 3,
+      retries: 1,
+    });
   });
 });

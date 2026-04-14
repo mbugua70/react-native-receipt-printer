@@ -48,7 +48,6 @@ describe('print()', () => {
     await print(receipt);
 
     expect(write).toHaveBeenCalledTimes(1);
-    // The encoded string must be a non-empty string of ESC/POS bytes
     expect(typeof write.mock.calls[0]![0]).toBe('string');
     expect(write.mock.calls[0]![0].length).toBeGreaterThan(0);
   });
@@ -59,7 +58,7 @@ describe('print()', () => {
       .spyOn(BluetoothManager, 'getConnectedDevice')
       .mockReturnValue(mockDevice(write));
 
-    await print(receipt, 3);
+    await print(receipt, { copies: 3 });
 
     expect(write).toHaveBeenCalledTimes(3);
   });
@@ -70,30 +69,60 @@ describe('print()', () => {
       .spyOn(BluetoothManager, 'getConnectedDevice')
       .mockReturnValue(mockDevice(write));
 
-    await print(receipt, 2);
+    await print(receipt, { copies: 2 });
 
     expect(write.mock.calls[0]![0]).toBe(write.mock.calls[1]![0]);
   });
 
-  it('throws PrintError when the device write fails', async () => {
-    const write = jest.fn().mockRejectedValue(new Error('BT write failed'));
-    jest
-      .spyOn(BluetoothManager, 'getConnectedDevice')
-      .mockReturnValue(mockDevice(write));
+  describe('retry logic', () => {
+    it('retries on failure and succeeds if a later attempt works', async () => {
+      const write = jest
+        .fn()
+        .mockRejectedValueOnce(new Error('BT hiccup'))
+        .mockResolvedValueOnce(undefined);
 
-    await expect(print(receipt)).rejects.toThrow(PrintError);
-  });
+      jest
+        .spyOn(BluetoothManager, 'getConnectedDevice')
+        .mockReturnValue(mockDevice(write));
 
-  it('includes the copy number in the PrintError message', async () => {
-    const write = jest
-      .fn()
-      .mockResolvedValueOnce(undefined) // copy 1 succeeds
-      .mockRejectedValueOnce(new Error('BT write failed')); // copy 2 fails
+      await expect(
+        print(receipt, { retries: 2, retryDelayMs: 0 })
+      ).resolves.toBeUndefined();
+      expect(write).toHaveBeenCalledTimes(2);
+    });
 
-    jest
-      .spyOn(BluetoothManager, 'getConnectedDevice')
-      .mockReturnValue(mockDevice(write));
+    it('throws PrintError after all retries are exhausted', async () => {
+      const write = jest.fn().mockRejectedValue(new Error('BT failed'));
+      jest
+        .spyOn(BluetoothManager, 'getConnectedDevice')
+        .mockReturnValue(mockDevice(write));
 
-    await expect(print(receipt, 2)).rejects.toThrow('copy 2 of 2');
+      await expect(
+        print(receipt, { retries: 2, retryDelayMs: 0 })
+      ).rejects.toThrow(PrintError);
+      // 1 original + 2 retries = 3 total attempts
+      expect(write).toHaveBeenCalledTimes(3);
+    });
+
+    it('includes attempt count in the PrintError message', async () => {
+      const write = jest.fn().mockRejectedValue(new Error('BT failed'));
+      jest
+        .spyOn(BluetoothManager, 'getConnectedDevice')
+        .mockReturnValue(mockDevice(write));
+
+      await expect(
+        print(receipt, { retries: 2, retryDelayMs: 0 })
+      ).rejects.toThrow('3 attempt(s)');
+    });
+
+    it('does not retry when retries=0', async () => {
+      const write = jest.fn().mockRejectedValue(new Error('BT failed'));
+      jest
+        .spyOn(BluetoothManager, 'getConnectedDevice')
+        .mockReturnValue(mockDevice(write));
+
+      await expect(print(receipt, { retries: 0 })).rejects.toThrow(PrintError);
+      expect(write).toHaveBeenCalledTimes(1);
+    });
   });
 });

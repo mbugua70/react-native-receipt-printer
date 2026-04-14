@@ -1,16 +1,11 @@
-import { print as rawPrint } from './PrinterManager';
+import { print as rawPrint, type PrintOptions } from './PrinterManager';
 import type { ReceiptData } from './EscPosEncoder';
 
 // ─── Job type ─────────────────────────────────────────────────────────────────
-//
-// Each item in the queue is a print job. It holds the receipt data, the number
-// of copies, and the resolve/reject callbacks of the Promise returned to the
-// caller. When the job finishes, we call resolve() or reject() to settle that
-// Promise.
 
 type PrintJob = {
   data: ReceiptData;
-  copies: number;
+  options: PrintOptions;
   resolve: () => void;
   reject: (err: unknown) => void;
 };
@@ -21,29 +16,21 @@ const _queue: PrintJob[] = [];
 let _processing = false;
 
 // ─── processNext ──────────────────────────────────────────────────────────────
-//
-// Picks the next job off the front of the queue and runs it.
-// Called after every job finishes (success or failure) so the queue keeps
-// moving. If the queue is empty or a job is already running, it returns early.
 
 async function processNext(): Promise<void> {
   if (_processing || _queue.length === 0) return;
 
   _processing = true;
 
-  // shift() removes and returns the first item — FIFO order
   const job = _queue.shift()!;
 
   try {
-    await rawPrint(job.data, job.copies);
+    await rawPrint(job.data, job.options);
     job.resolve();
   } catch (err) {
-    // The job failed — reject its promise so the caller is notified.
-    // The queue continues with the next job regardless.
     job.reject(err);
   } finally {
     _processing = false;
-    // Kick off the next job without awaiting — keeps the call stack clean.
     processNext().catch(() => {});
   }
 }
@@ -59,16 +46,17 @@ async function processNext(): Promise<void> {
  *
  * @example
  * ```ts
- * // Fire and forget — don't wait
- * enqueue(receipt);
- *
- * // Or await if you need to know when it's done
- * await enqueue(receipt, 2);
+ * enqueue(receipt);                              // fire and forget
+ * await enqueue(receipt, { copies: 2 });         // wait for completion
+ * await enqueue(receipt, { retries: 5 });        // more retries
  * ```
  */
-export function enqueue(data: ReceiptData, copies: number = 1): Promise<void> {
+export function enqueue(
+  data: ReceiptData,
+  options: PrintOptions = {}
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    _queue.push({ data, copies, resolve, reject });
+    _queue.push({ data, options, resolve, reject });
     processNext().catch(() => {});
   });
 }
@@ -93,7 +81,6 @@ export function isProcessing(): boolean {
  * The job currently printing is not affected — it will finish normally.
  */
 export function clearQueue(): void {
-  // Reject all waiting jobs so their Promises don't hang forever
   for (const job of _queue) {
     job.reject(new Error('Print queue was cleared.'));
   }

@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { enqueue } from '../printer/PrintQueue';
 import type { ReceiptData } from '../printer/EscPosEncoder';
+import type { PrintOptions } from '../printer/PrinterManager';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -23,7 +24,7 @@ export type UsePrinterReturn = {
    * />
    * ```
    */
-  print: (data: ReceiptData, copies?: number) => Promise<void>;
+  print: (data: ReceiptData, options?: PrintOptions) => Promise<void>;
 
   /** True while this hook's print call is in flight. */
   isPrinting: boolean;
@@ -63,12 +64,12 @@ export function usePrinter(): UsePrinterReturn {
   const [error, setError] = useState<Error | null>(null);
 
   const print = useCallback(
-    async (data: ReceiptData, copies: number = 1): Promise<void> => {
+    async (data: ReceiptData, options: PrintOptions = {}): Promise<void> => {
       setIsPrinting(true);
       setError(null);
 
       try {
-        await enqueue(data, copies);
+        await enqueue(data, options);
       } catch (err) {
         const printError = err instanceof Error ? err : new Error(String(err));
         setError(printError);

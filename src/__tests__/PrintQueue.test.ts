@@ -36,15 +36,18 @@ describe('PrintQueue', () => {
 
       await enqueue(receipt);
 
-      expect(mockPrint).toHaveBeenCalledWith(receipt, 1);
+      expect(mockPrint).toHaveBeenCalledWith(receipt, {});
     });
 
-    it('passes copies to print()', async () => {
+    it('passes options to print()', async () => {
       mockPrint.mockResolvedValue(undefined);
 
-      await enqueue(receipt, 3);
+      await enqueue(receipt, { copies: 3, retries: 1 });
 
-      expect(mockPrint).toHaveBeenCalledWith(receipt, 3);
+      expect(mockPrint).toHaveBeenCalledWith(receipt, {
+        copies: 3,
+        retries: 1,
+      });
     });
 
     it('resolves when the job succeeds', async () => {
