@@ -1,5 +1,6 @@
 import { getConnectedDevice } from '../bluetooth/BluetoothManager';
 import { encode, type ReceiptData } from './EscPosEncoder';
+import { emitPrintStatus } from './PrintEvents';
 
 // ─── Errors ───────────────────────────────────────────────────────────────────
 
@@ -100,7 +101,14 @@ export async function print(
   const encoded = encode(data);
 
   for (let copy = 0; copy < copies; copy++) {
+    const copyNumber = copy + 1;
     let lastError: unknown;
+
+    emitPrintStatus({
+      status: 'sending',
+      copy: copyNumber,
+      totalCopies: copies,
+    });
 
     // attempt 0 is the first try, attempts 1..retries are the retries
     for (let attempt = 0; attempt <= retries; attempt++) {
@@ -119,12 +127,24 @@ export async function print(
     }
 
     if (lastError !== undefined) {
+      const error =
+        lastError instanceof Error ? lastError : new Error(String(lastError));
+
+      emitPrintStatus({
+        status: 'error',
+        copy: copyNumber,
+        totalCopies: copies,
+        error,
+      });
+
       throw new PrintError(
-        `Failed to print copy ${copy + 1} of ${copies} after ${
+        `Failed to print copy ${copyNumber} of ${copies} after ${
           retries + 1
         } attempt(s).`,
-        lastError
+        error
       );
     }
+
+    emitPrintStatus({ status: 'done', copy: copyNumber, totalCopies: copies });
   }
 }
