@@ -67,6 +67,8 @@ The library handles both automatically — you just call `requestBluetoothPermis
 
 ## 📦 Installation
 
+> **Expo users:** This library requires native modules and is **not compatible with Expo Go**. Use a [development build](https://docs.expo.dev/develop/development-builds/introduction/) (`expo-dev-client`) or the bare workflow instead.
+
 Install the library along with its peer dependencies:
 
 ```bash
