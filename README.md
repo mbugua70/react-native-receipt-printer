@@ -1,6 +1,21 @@
 # react-native-receipt-printer
 
+[![npm version](https://img.shields.io/npm/v/react-native-receipt-printer.svg)](https://www.npmjs.com/package/react-native-receipt-printer)
+[![npm downloads](https://img.shields.io/npm/dm/react-native-receipt-printer.svg)](https://www.npmjs.com/package/react-native-receipt-printer)
+[![license](https://img.shields.io/npm/l/react-native-receipt-printer.svg)](LICENSE)
+
 A React Native library for thermal receipt printing over Bluetooth, with built-in permission handling, device connection management, and dynamic receipt building.
+
+---
+
+## Contents
+
+- [Features](#-features)
+- [Requirements](#-requirements)
+- [Installation](#-installation)
+- [Printing](#️-printing)
+- [Bluetooth API](#-bluetooth-api)
+- [Roadmap](#️-roadmap)
 
 ---
 
