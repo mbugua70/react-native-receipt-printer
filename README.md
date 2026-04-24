@@ -531,6 +531,40 @@ function PrinterStatus() {
 
 ---
 
+## 📱 Example app
+
+A fully working demo app is included in the [`example/`](./example) directory. It covers the complete end-to-end flow in a single screen:
+
+| What it demos | Where in code |
+|---|---|
+| Permission request + status display | `PermissionSection` component |
+| Bluetooth radio state + readiness check | `BluetoothSection` component |
+| List already-paired (bonded) devices | `loadBondedDevices()` + device list |
+| Live device scanning with real-time results | `scan()` + `discoveredDevices` |
+| Connect / disconnect to a device | `connect(address)` / `disconnect()` |
+| Live event log — connection + radio state changes | `EventLog` component + `onConnectionChange` / `onBluetoothStateChange` |
+
+**Run it yourself:**
+
+```bash
+# Clone the repo
+git clone https://github.com/mbugua70/react-native-receipt-printer.git
+cd react-native-receipt-printer
+
+# Install dependencies
+yarn
+
+# Run on Android
+yarn example android
+
+# Run on iOS
+yarn example ios
+```
+
+> The example app reads directly from the local `src/` — no need to install from npm.
+
+---
+
 ## 🗺️ Roadmap
 
 - [x] Bluetooth permission handling (Android 12+, legacy Android, iOS)
