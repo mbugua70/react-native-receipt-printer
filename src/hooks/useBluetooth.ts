@@ -144,6 +144,35 @@ export function useBluetooth(): UseBluetoothReturn {
   // Guard against concurrent ensureReady() calls triggered by rapid BT toggles
   const isCheckingReadyRef = useRef(false);
 
+  // ── Mount-time silent check ─────────────────────────────────────────────────
+  // Hydrate isReady on mount — onBluetoothStateChange only fires on changes,
+  // so if BT is already on when the hook mounts, isReady would stay false forever.
+  useEffect(() => {
+    async function initialCheck() {
+      if (isCheckingReadyRef.current) return;
+      isCheckingReadyRef.current = true;
+      try {
+        const permResult = await checkBluetoothPermissions();
+        if (!mountedRef.current) return;
+        if (!permResult.granted) {
+          setIsReady(false);
+          setReadyError(
+            permResult.blocked ? 'permission_blocked' : 'permission_denied'
+          );
+          return;
+        }
+        const enabled = await isBluetoothEnabled();
+        if (!mountedRef.current) return;
+        setIsReady(enabled);
+        setReadyError(enabled ? null : 'bluetooth_disabled');
+      } catch {
+      } finally {
+        isCheckingReadyRef.current = false;
+      }
+    }
+    initialCheck();
+  }, []);
+
   // ── Event listeners ─────────────────────────────────────────────────────────
 
   useEffect(() => {
