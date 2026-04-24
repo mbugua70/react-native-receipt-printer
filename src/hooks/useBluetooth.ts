@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import {
   connect as btConnect,
   disconnect as btDisconnect,
@@ -6,6 +7,7 @@ import {
   findDevice,
   getBondedDevices,
   getConnectedDevice,
+  isBluetoothEnabled,
   startScan,
   stopScan,
   type BluetoothDevice,
@@ -13,6 +15,7 @@ import {
   type DeviceQuery,
   type ScanOptions,
 } from '../bluetooth/BluetoothManager';
+import { checkBluetoothPermissions } from '../bluetooth/BluetoothPermissions';
 import {
   onConnectionChange,
   onBluetoothStateChange,
@@ -165,22 +168,23 @@ export function useBluetooth(): UseBluetoothReturn {
         setReadyError('bluetooth_disabled');
         setConnectedDevice(null);
       } else {
-        // BT turned back on — re-check readiness automatically.
-        // Guard prevents concurrent calls if BT is toggled rapidly.
+        // event.enabled = true already tells us BT is on — no need to recheck radio.
+        // Silently verify permissions only (no dialog) before marking ready.
         if (isCheckingReadyRef.current) return;
         isCheckingReadyRef.current = true;
         try {
-          const result = await ensureReady();
+          const permResult = await checkBluetoothPermissions();
           if (!mountedRef.current) return;
-          if (result.ready) {
+          if (permResult.granted) {
             setIsReady(true);
             setReadyError(null);
           } else {
             setIsReady(false);
-            setReadyError(result.reason as BluetoothReadyError);
+            setReadyError(
+              permResult.blocked ? 'permission_blocked' : 'permission_denied'
+            );
           }
         } catch {
-          // ensureReady failed — leave existing state, user can retry manually
         } finally {
           isCheckingReadyRef.current = false;
         }
@@ -191,6 +195,43 @@ export function useBluetooth(): UseBluetoothReturn {
       unsubConnection();
       unsubState();
     };
+  }, []);
+
+  // ── Foreground recheck ──────────────────────────────────────────────────────
+  // When the user goes to Settings to toggle BT and comes back, the
+  // onBluetoothStateChange event may have fired while the app was backgrounded
+  // and the state update was lost. Re-check silently on foreground resume.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', async (nextState) => {
+      if (nextState !== 'active' || !mountedRef.current) return;
+      if (isCheckingReadyRef.current) return;
+      isCheckingReadyRef.current = true;
+      try {
+        const permResult = await checkBluetoothPermissions();
+        if (!mountedRef.current) return;
+        if (!permResult.granted) {
+          setIsReady(false);
+          setReadyError(
+            permResult.blocked ? 'permission_blocked' : 'permission_denied'
+          );
+          return;
+        }
+        const enabled = await isBluetoothEnabled();
+        if (!mountedRef.current) return;
+        if (enabled) {
+          setIsReady(true);
+          setReadyError(null);
+        } else {
+          setIsReady(false);
+          setReadyError('bluetooth_disabled');
+        }
+      } catch {
+      } finally {
+        isCheckingReadyRef.current = false;
+      }
+    });
+
+    return () => sub.remove();
   }, []);
 
   // ── checkReady ──────────────────────────────────────────────────────────────
