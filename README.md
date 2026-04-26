@@ -16,6 +16,7 @@ A React Native library for thermal receipt printing over Bluetooth, with built-i
 - [Printing](#️-printing)
 - [Bluetooth API](#-bluetooth-api)
 - [Roadmap](#️-roadmap)
+- [Feedback and contributions](#-feedback-and-contributions)
 
 ---
 
@@ -581,6 +582,14 @@ yarn example ios
 - [x] Print status events — `sending`, `done`, `error`
 - [x] `usePrinter` hook — `isPrinting`, `status`, `error`
 - [ ] Receipt templates
+
+---
+
+## 💬 Feedback and contributions
+
+If you try this library, feedback is welcome — especially around printer compatibility, Bluetooth connection handling, and receipt formatting.
+
+Open an issue or start a discussion on [GitHub](https://github.com/mbugua70/react-native-receipt-printer/issues).
 
 ---
 
