@@ -26,7 +26,7 @@ A React Native library for thermal receipt printing over Bluetooth, with built-i
 - **Three-layer API** — raw functions, React hooks, and Context providers. Pick the level that fits your app.
 - **Device discovery** — scan for nearby devices or list already-paired ones.
 - **Connection management** — connect, disconnect, and track connection state reactively.
-- **ESC/POS receipt encoding** — supports text, dividers, spacers, QR codes, and paper cut. 58mm and 80mm paper widths.
+- **ESC/POS thermal encoding** — supports text, dividers, spacers, QR codes, and paper cut. 58mm and 80mm paper widths.
 - **Fluent receipt builder** — construct receipts with chainable methods or pass a JSON structure from your backend.
 - **Print queue** — jobs are processed one at a time. No corrupted output from concurrent prints.
 - **Retry logic** — automatically retries failed writes before giving up. Configurable per print call.
@@ -573,8 +573,8 @@ yarn example ios
 - [x] Device discovery (bonded + scan)
 - [x] Connection management
 - [x] Bluetooth events — connection and radio state changes
-- [x] ESC/POS encoder — text, dividers, spacers, QR codes, paper cut
-- [x] 58mm / 80mm paper width support
+- [x] ESC/POS thermal encoder — text, dividers, spacers, QR codes, paper cut
+- [x] 58mm / 80mm thermal paper width support
 - [x] Fluent receipt builder
 - [x] `print()` with copies support
 - [x] Print queue — serial job processing
