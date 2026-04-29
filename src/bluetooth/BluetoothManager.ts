@@ -155,7 +155,7 @@ export async function startScan(
   const { timeoutMs = 10_000 } = options;
 
   const subscription = RNBluetoothClassic.onDeviceDiscovered((event) => {
-    onDeviceFound(event.device as BluetoothDevice);
+    if (event?.device?.address) onDeviceFound(event.device as BluetoothDevice);
   });
 
   try {
