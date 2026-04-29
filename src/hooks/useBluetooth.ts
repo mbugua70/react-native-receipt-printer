@@ -298,6 +298,8 @@ export function useBluetooth(): UseBluetoothReturn {
     try {
       await startScan((device) => {
         if (!mountedRef.current) return;
+
+        if (!device || !device.address) return;
         setDiscoveredDevices((prev) => {
           // avoid duplicates — same address can be reported more than once
           const exists = prev.some((d) => d?.address === device?.address);
