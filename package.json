@@ -1,6 +1,6 @@
 {
   "name": "react-native-receipt-printer",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "A React Native library for thermal receipt printing over Bluetooth, with device connection management and dynamic receipt building.",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",
