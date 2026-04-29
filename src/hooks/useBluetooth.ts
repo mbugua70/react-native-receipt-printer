@@ -300,7 +300,7 @@ export function useBluetooth(): UseBluetoothReturn {
         if (!mountedRef.current) return;
         setDiscoveredDevices((prev) => {
           // avoid duplicates — same address can be reported more than once
-          const exists = prev.some((d) => d.address === device.address);
+          const exists = prev.some((d) => d?.address === device?.address);
           return exists ? prev : [...prev, device];
         });
       }, options);
