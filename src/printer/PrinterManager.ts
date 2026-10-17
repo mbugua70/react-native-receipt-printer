@@ -1,23 +1,34 @@
-import { getConnectedDevice } from '../bluetooth/BluetoothManager';
+import {
+  connect,
+  disconnect,
+  getConnectedDevice,
+  type BluetoothDevice,
+} from '../bluetooth/BluetoothManager';
 import { encode, type ReceiptData } from './EscPosEncoder';
 import { emitPrintStatus } from './PrintEvents';
 
 // ─── Errors ───────────────────────────────────────────────────────────────────
 
 /**
- * Thrown when `print()` is called but no Bluetooth device is connected.
- * The caller should check `isConnected()` or call `connect()` first.
+ * Thrown when `print()` is called but no Bluetooth device is connected, or
+ * when the native side reports the connection is gone and it couldn't be
+ * reopened. The caller should check `isConnected()` or call `connect()` first.
+ * `cause` holds the native error when there was one.
  */
 export class NotConnectedError extends Error {
-  constructor() {
+  readonly cause: unknown;
+
+  constructor(cause?: unknown) {
     super('No Bluetooth device is connected. Call connect() before printing.');
     this.name = 'NotConnectedError';
+    this.cause = cause;
   }
 }
 
 /**
  * Thrown when `print()` fails to write data to the connected device after
- * all retry attempts are exhausted. Wraps the last underlying error.
+ * all retry attempts are exhausted. Wraps the last underlying error, and its
+ * message ends with that error's reason (e.g. "…: Broken pipe").
  */
 export class PrintError extends Error {
   readonly cause: unknown;
@@ -50,12 +61,84 @@ export type PrintOptions = {
    * Default: 500ms — gives the printer time to recover.
    */
   retryDelayMs?: number;
+
+  /**
+   * Send each copy in pieces of at most this many characters instead of one
+   * write. Some printers (e.g. POS built-in ones) print short receipts fine
+   * but drop the connection on one long write. Each piece gets its own
+   * retries. Default: 0 — the whole copy in a single write.
+   */
+  chunkSize?: number;
+
+  /**
+   * Pause between pieces in milliseconds when `chunkSize` is set, giving the
+   * printer's buffer time to drain. Default: 0.
+   */
+  chunkDelayMs?: number;
+
+  /**
+   * After the first failed write, close and reopen the connection to the same
+   * printer (once per print) before retrying. Writing again on the socket
+   * that just failed rarely works — a dropped link stays dropped until it's
+   * reopened. If the printer can't be reached, retrying stops early.
+   * Default: true.
+   */
+  reconnect?: boolean;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Whether a native write error means there's no open connection to the
+ * device (react-native-bluetooth-classic rejects with this code when the
+ * socket was dropped and removed on the native side).
+ */
+function isNotConnectedError(err: unknown): boolean {
+  return (err as { code?: unknown } | null)?.code === 'NOT_CURRENTLY_CONNECTED';
+}
+
+/**
+ * Close the current connection and open a fresh one to the same address.
+ * Returns the new device, or null if the printer couldn't be reached.
+ */
+async function reopenConnection(
+  address: string
+): Promise<BluetoothDevice | null> {
+  try {
+    await disconnect();
+  } catch {
+    // the socket may already be gone — reopening is what matters
+  }
+  try {
+    await connect(address);
+    return getConnectedDevice();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Split an encoded payload into pieces of at most `chunkSize` characters.
+ * Never splits a surrogate pair, so a character like an emoji isn't cut in
+ * half. `chunkSize` of 0 (or anything not positive) keeps one piece.
+ */
+export function splitPayload(payload: string, chunkSize: number): string[] {
+  if (!(chunkSize > 0) || payload.length <= chunkSize) return [payload];
+
+  const chunks: string[] = [];
+  let start = 0;
+  while (start < payload.length) {
+    let end = Math.min(start + chunkSize, payload.length);
+    const last = payload.charCodeAt(end - 1);
+    if (end < payload.length && last >= 0xd800 && last <= 0xdbff) end++;
+    chunks.push(payload.slice(start, end));
+    start = end;
+  }
+  return chunks;
 }
 
 // ─── print() ──────────────────────────────────────────────────────────────────
@@ -65,10 +148,12 @@ function delay(ms: number): Promise<void> {
  *
  * - Requires an active connection — call `connect()` before printing.
  * - Retries failed writes automatically before giving up.
- * - Each copy is sent as a separate write to the device.
+ * - Each copy is sent as a separate write to the device, or in pieces of
+ *   `chunkSize` characters (each with its own retries) when that is set.
  *
- * @throws {NotConnectedError} if no device is connected
- * @throws {PrintError}        if all retry attempts fail
+ * @throws {NotConnectedError} if no device is connected, or the connection was
+ *                             lost and could not be reopened
+ * @throws {PrintError}        if all retry attempts fail (message ends with the reason)
  *
  * @example
  * ```ts
@@ -90,15 +175,24 @@ export async function print(
   data: ReceiptData,
   options: PrintOptions = {}
 ): Promise<void> {
-  const { copies = 1, retries = 2, retryDelayMs = 500 } = options;
+  const {
+    copies = 1,
+    retries = 2,
+    retryDelayMs = 500,
+    chunkSize = 0,
+    chunkDelayMs = 0,
+    reconnect = true,
+  } = options;
 
-  const device = getConnectedDevice();
+  let device = getConnectedDevice();
 
   if (!device) {
     throw new NotConnectedError();
   }
 
-  const encoded = encode(data);
+  let hasReconnected = false;
+
+  const chunks = splitPayload(encode(data), chunkSize);
 
   for (let copy = 0; copy < copies; copy++) {
     const copyNumber = copy + 1;
@@ -110,19 +204,39 @@ export async function print(
       totalCopies: copies,
     });
 
-    // attempt 0 is the first try, attempts 1..retries are the retries
-    for (let attempt = 0; attempt <= retries; attempt++) {
-      try {
-        await device.write(encoded);
-        lastError = undefined;
-        break; // success — move on to the next copy
-      } catch (err) {
-        lastError = err;
+    let attemptsMade = 0;
 
-        const isLastAttempt = attempt === retries;
-        if (!isLastAttempt) {
+    for (let part = 0; part < chunks.length; part++) {
+      attemptsMade = 0;
+      // attempt 0 is the first try, attempts 1..retries are the retries
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        attemptsMade++;
+        try {
+          await device.write(chunks[part]!);
+          lastError = undefined;
+          break; // success — move on to the next piece
+        } catch (err) {
+          lastError = err;
+
+          const isLastAttempt = attempt === retries;
+          if (isLastAttempt) break;
+
           await delay(retryDelayMs);
+
+          if (reconnect && !hasReconnected) {
+            hasReconnected = true;
+            const reopened = await reopenConnection(device.address);
+            if (!reopened) break; // printer unreachable — stop retrying a dead link
+            device = reopened;
+          }
         }
+      }
+
+      if (lastError !== undefined) break; // this piece failed — stop the copy
+
+      const isLastPart = part === chunks.length - 1;
+      if (!isLastPart && chunkDelayMs > 0) {
+        await delay(chunkDelayMs);
       }
     }
 
@@ -137,10 +251,16 @@ export async function print(
         error,
       });
 
+      // The native module lost the connection and it couldn't be reopened —
+      // that's "not connected", not a failed print.
+      if (isNotConnectedError(error)) {
+        throw new NotConnectedError(error);
+      }
+
       throw new PrintError(
-        `Failed to print copy ${copyNumber} of ${copies} after ${
-          retries + 1
-        } attempt(s).`,
+        `Failed to print copy ${copyNumber} of ${copies} after ${attemptsMade} attempt(s)${
+          error.message ? `: ${error.message}` : '.'
+        }`,
         error
       );
     }

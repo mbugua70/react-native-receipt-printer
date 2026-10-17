@@ -267,3 +267,38 @@ export function getConnectedDevice(): BluetoothDevice | null {
 export function isConnected(): boolean {
   return _connectedDevice !== null;
 }
+
+// ─── Keeping the saved device honest ─────────────────────────────────────────
+//
+// _connectedDevice used to change only through connect()/disconnect(), so a
+// printer that powered off or went out of range still counted as connected
+// and every print went to a dead connection. Android's "disconnected" event
+// also fires when a socket is closed on purpose and can land just after a
+// quick reconnect to the same printer, so the native side is asked before
+// the device is forgotten.
+
+async function forgetIfDisconnected(address: string): Promise<void> {
+  if (_connectedDevice?.address !== address) return;
+
+  let stillConnected = false;
+  try {
+    stillConnected = await RNBluetoothClassic.isDeviceConnected(address);
+  } catch {
+    // Bluetooth off or the check failed — treat it as gone
+  }
+
+  // Only forget it if it's still the device we were asked about — connect()
+  // may have switched to another printer while we were checking.
+  if (!stillConnected && _connectedDevice?.address === address) {
+    _connectedDevice = null;
+  }
+}
+
+RNBluetoothClassic.onDeviceDisconnected((event) => {
+  const address = event?.device?.address;
+  if (address) forgetIfDisconnected(address).catch(() => {});
+});
+
+RNBluetoothClassic.onStateChanged((event) => {
+  if (!event?.enabled) _connectedDevice = null;
+});
