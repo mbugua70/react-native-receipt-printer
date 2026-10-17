@@ -50,12 +50,46 @@ export type PrintOptions = {
    * Default: 500ms — gives the printer time to recover.
    */
   retryDelayMs?: number;
+
+  /**
+   * Send each copy in pieces of at most this many characters instead of one
+   * write. Some printers (e.g. POS built-in ones) print short receipts fine
+   * but drop the connection on one long write. Each piece gets its own
+   * retries. Default: 0 — the whole copy in a single write.
+   */
+  chunkSize?: number;
+
+  /**
+   * Pause between pieces in milliseconds when `chunkSize` is set, giving the
+   * printer's buffer time to drain. Default: 0.
+   */
+  chunkDelayMs?: number;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Split an encoded payload into pieces of at most `chunkSize` characters.
+ * Never splits a surrogate pair, so a character like an emoji isn't cut in
+ * half. `chunkSize` of 0 (or anything not positive) keeps one piece.
+ */
+export function splitPayload(payload: string, chunkSize: number): string[] {
+  if (!(chunkSize > 0) || payload.length <= chunkSize) return [payload];
+
+  const chunks: string[] = [];
+  let start = 0;
+  while (start < payload.length) {
+    let end = Math.min(start + chunkSize, payload.length);
+    const last = payload.charCodeAt(end - 1);
+    if (end < payload.length && last >= 0xd800 && last <= 0xdbff) end++;
+    chunks.push(payload.slice(start, end));
+    start = end;
+  }
+  return chunks;
 }
 
 // ─── print() ──────────────────────────────────────────────────────────────────
@@ -65,7 +99,8 @@ function delay(ms: number): Promise<void> {
  *
  * - Requires an active connection — call `connect()` before printing.
  * - Retries failed writes automatically before giving up.
- * - Each copy is sent as a separate write to the device.
+ * - Each copy is sent as a separate write to the device, or in pieces of
+ *   `chunkSize` characters (each with its own retries) when that is set.
  *
  * @throws {NotConnectedError} if no device is connected
  * @throws {PrintError}        if all retry attempts fail
@@ -90,7 +125,13 @@ export async function print(
   data: ReceiptData,
   options: PrintOptions = {}
 ): Promise<void> {
-  const { copies = 1, retries = 2, retryDelayMs = 500 } = options;
+  const {
+    copies = 1,
+    retries = 2,
+    retryDelayMs = 500,
+    chunkSize = 0,
+    chunkDelayMs = 0,
+  } = options;
 
   const device = getConnectedDevice();
 
@@ -98,7 +139,7 @@ export async function print(
     throw new NotConnectedError();
   }
 
-  const encoded = encode(data);
+  const chunks = splitPayload(encode(data), chunkSize);
 
   for (let copy = 0; copy < copies; copy++) {
     const copyNumber = copy + 1;
@@ -110,19 +151,28 @@ export async function print(
       totalCopies: copies,
     });
 
-    // attempt 0 is the first try, attempts 1..retries are the retries
-    for (let attempt = 0; attempt <= retries; attempt++) {
-      try {
-        await device.write(encoded);
-        lastError = undefined;
-        break; // success — move on to the next copy
-      } catch (err) {
-        lastError = err;
+    for (let part = 0; part < chunks.length; part++) {
+      // attempt 0 is the first try, attempts 1..retries are the retries
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          await device.write(chunks[part]!);
+          lastError = undefined;
+          break; // success — move on to the next piece
+        } catch (err) {
+          lastError = err;
 
-        const isLastAttempt = attempt === retries;
-        if (!isLastAttempt) {
-          await delay(retryDelayMs);
+          const isLastAttempt = attempt === retries;
+          if (!isLastAttempt) {
+            await delay(retryDelayMs);
+          }
         }
+      }
+
+      if (lastError !== undefined) break; // this piece failed — stop the copy
+
+      const isLastPart = part === chunks.length - 1;
+      if (!isLastPart && chunkDelayMs > 0) {
+        await delay(chunkDelayMs);
       }
     }
 
