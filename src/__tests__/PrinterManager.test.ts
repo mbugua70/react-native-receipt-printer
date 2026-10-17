@@ -2,6 +2,8 @@
 // PrinterManager loads it — preventing native TurboModule errors in tests.
 jest.mock('../bluetooth/BluetoothManager', () => ({
   getConnectedDevice: jest.fn(),
+  connect: jest.fn().mockResolvedValue(undefined),
+  disconnect: jest.fn().mockResolvedValue(undefined),
 }));
 
 import {
@@ -24,8 +26,11 @@ const receipt: ReceiptData = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function mockDevice(writeFn = jest.fn().mockResolvedValue(undefined)) {
-  return { write: writeFn } as unknown as ReturnType<
+function mockDevice(
+  writeFn = jest.fn().mockResolvedValue(undefined),
+  address = 'AA:BB:CC:DD:EE:FF'
+) {
+  return { write: writeFn, address } as unknown as ReturnType<
     typeof BluetoothManager.getConnectedDevice
   >;
 }
@@ -126,6 +131,86 @@ describe('print()', () => {
       expect(write).toHaveBeenCalledTimes(1);
     });
   });
+  describe('reconnect', () => {
+    const connect = jest.mocked(BluetoothManager.connect);
+    const disconnect = jest.mocked(BluetoothManager.disconnect);
+    const getConnected = jest.mocked(BluetoothManager.getConnectedDevice);
+
+    beforeEach(() => {
+      connect.mockReset().mockResolvedValue(undefined);
+      disconnect.mockReset().mockResolvedValue(undefined);
+      getConnected.mockReset();
+    });
+
+    it('reopens the connection after the first failure and retries on it', async () => {
+      const deadWrite = jest.fn().mockRejectedValue(new Error('Broken pipe'));
+      const freshWrite = jest.fn().mockResolvedValue(undefined);
+      getConnected
+        .mockReturnValueOnce(mockDevice(deadWrite)) // print() start
+        .mockReturnValue(mockDevice(freshWrite)); // after reconnect
+
+      await print(receipt, { retryDelayMs: 0 });
+
+      expect(disconnect).toHaveBeenCalledTimes(1);
+      expect(connect).toHaveBeenCalledWith('AA:BB:CC:DD:EE:FF');
+      expect(deadWrite).toHaveBeenCalledTimes(1);
+      expect(freshWrite).toHaveBeenCalledTimes(1);
+    });
+
+    it('reconnects only once per print even if writes keep failing', async () => {
+      const write = jest.fn().mockRejectedValue(new Error('Broken pipe'));
+      getConnected.mockReturnValue(mockDevice(write));
+
+      await expect(
+        print(receipt, { retries: 2, retryDelayMs: 0 })
+      ).rejects.toThrow(PrintError);
+
+      expect(connect).toHaveBeenCalledTimes(1);
+      expect(write).toHaveBeenCalledTimes(3);
+    });
+
+    it('still reconnects when the old socket fails to close', async () => {
+      const deadWrite = jest.fn().mockRejectedValue(new Error('Broken pipe'));
+      const freshWrite = jest.fn().mockResolvedValue(undefined);
+      disconnect.mockRejectedValue(new Error('not connected'));
+      getConnected
+        .mockReturnValueOnce(mockDevice(deadWrite))
+        .mockReturnValue(mockDevice(freshWrite));
+
+      await print(receipt, { retryDelayMs: 0 });
+
+      expect(connect).toHaveBeenCalledTimes(1);
+      expect(freshWrite).toHaveBeenCalledTimes(1);
+    });
+
+    it('stops retrying with PrintError when the printer cannot be reached', async () => {
+      const write = jest.fn().mockRejectedValue(new Error('Broken pipe'));
+      connect.mockRejectedValue(new Error('connection failed'));
+      getConnected.mockReturnValue(mockDevice(write));
+
+      const err = await print(receipt, { retries: 2, retryDelayMs: 0 }).catch(
+        (e) => e
+      );
+
+      expect(err).toBeInstanceOf(PrintError);
+      expect((err as PrintError).cause).toEqual(new Error('Broken pipe'));
+      expect(write).toHaveBeenCalledTimes(1); // no retries on the dead link
+    });
+
+    it('does not reconnect when reconnect is false', async () => {
+      const write = jest.fn().mockRejectedValue(new Error('Broken pipe'));
+      getConnected.mockReturnValue(mockDevice(write));
+
+      await expect(
+        print(receipt, { retries: 2, retryDelayMs: 0, reconnect: false })
+      ).rejects.toThrow(PrintError);
+
+      expect(connect).not.toHaveBeenCalled();
+      expect(disconnect).not.toHaveBeenCalled();
+      expect(write).toHaveBeenCalledTimes(3);
+    });
+  });
+
   describe('chunked writes', () => {
     const longReceipt: ReceiptData = {
       lines: Array.from({ length: 40 }, (_, i) => ({

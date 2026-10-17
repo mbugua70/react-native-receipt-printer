@@ -1,4 +1,9 @@
-import { getConnectedDevice } from '../bluetooth/BluetoothManager';
+import {
+  connect,
+  disconnect,
+  getConnectedDevice,
+  type BluetoothDevice,
+} from '../bluetooth/BluetoothManager';
 import { encode, type ReceiptData } from './EscPosEncoder';
 import { emitPrintStatus } from './PrintEvents';
 
@@ -64,12 +69,41 @@ export type PrintOptions = {
    * printer's buffer time to drain. Default: 0.
    */
   chunkDelayMs?: number;
+
+  /**
+   * After the first failed write, close and reopen the connection to the same
+   * printer (once per print) before retrying. Writing again on the socket
+   * that just failed rarely works — a dropped link stays dropped until it's
+   * reopened. If the printer can't be reached, retrying stops early.
+   * Default: true.
+   */
+  reconnect?: boolean;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Close the current connection and open a fresh one to the same address.
+ * Returns the new device, or null if the printer couldn't be reached.
+ */
+async function reopenConnection(
+  address: string
+): Promise<BluetoothDevice | null> {
+  try {
+    await disconnect();
+  } catch {
+    // the socket may already be gone — reopening is what matters
+  }
+  try {
+    await connect(address);
+    return getConnectedDevice();
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -131,13 +165,16 @@ export async function print(
     retryDelayMs = 500,
     chunkSize = 0,
     chunkDelayMs = 0,
+    reconnect = true,
   } = options;
 
-  const device = getConnectedDevice();
+  let device = getConnectedDevice();
 
   if (!device) {
     throw new NotConnectedError();
   }
+
+  let hasReconnected = false;
 
   const chunks = splitPayload(encode(data), chunkSize);
 
@@ -162,8 +199,15 @@ export async function print(
           lastError = err;
 
           const isLastAttempt = attempt === retries;
-          if (!isLastAttempt) {
-            await delay(retryDelayMs);
+          if (isLastAttempt) break;
+
+          await delay(retryDelayMs);
+
+          if (reconnect && !hasReconnected) {
+            hasReconnected = true;
+            const reopened = await reopenConnection(device.address);
+            if (!reopened) break; // printer unreachable — stop retrying a dead link
+            device = reopened;
           }
         }
       }
