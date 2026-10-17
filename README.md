@@ -29,7 +29,8 @@ A React Native library for thermal receipt printing over Bluetooth, with built-i
 - **ESC/POS thermal encoding** — supports text, dividers, spacers, QR codes, and paper cut. 58mm and 80mm paper widths.
 - **Fluent receipt builder** — construct receipts with chainable methods or pass a JSON structure from your backend.
 - **Print queue** — jobs are processed one at a time. No corrupted output from concurrent prints.
-- **Retry logic** — automatically retries failed writes before giving up. Configurable per print call.
+- **Retry logic** — automatically retries failed writes before giving up, reopening the connection once if the link dropped. Configurable per print call.
+- **Chunked writes** — send long receipts (manifests, reports) in small pieces for printers that drop the connection on one big write.
 - **Print status events** — subscribe to `sending`, `done`, and `error` events in real time.
 - **`usePrinter` hook** — `isPrinting`, `status`, and `error` state wired up automatically.
 
@@ -204,6 +205,7 @@ await print(receipt);                               // 1 copy, 2 retries
 await print(receipt, { copies: 2 });               // 2 copies
 await print(receipt, { copies: 1, retries: 5 });   // up to 5 retries
 await print(receipt, { copies: 1, retries: 0 });   // no retries
+await print(manifest, { chunkSize: 512, chunkDelayMs: 20 }); // long receipt in pieces
 ```
 
 `PrintOptions`:
@@ -213,6 +215,23 @@ await print(receipt, { copies: 1, retries: 0 });   // no retries
 | `copies` | `number` | `1` | How many receipts to print |
 | `retries` | `number` | `2` | How many times to retry a failed write |
 | `retryDelayMs` | `number` | `500` | Milliseconds between retry attempts |
+| `chunkSize` | `number` | `0` | Send each copy in pieces of at most this many characters. `0` sends the whole copy in one write |
+| `chunkDelayMs` | `number` | `0` | Milliseconds to pause between pieces when `chunkSize` is set |
+| `reconnect` | `boolean` | `true` | After the first failed write, close and reopen the connection to the same printer (once per print) before retrying |
+
+#### Long receipts
+
+Some printers — especially the built-in printers on POS terminals — print short receipts fine but drop the Bluetooth connection when a long receipt (a passenger manifest, a daily report) arrives in one write. Set `chunkSize` to send it in pieces, with `chunkDelayMs` giving the printer's buffer time to drain:
+
+```ts
+await print(manifest, { chunkSize: 512, chunkDelayMs: 20 });
+```
+
+Smaller pieces and longer pauses are gentler on slow printers (e.g. `256` / `35`); larger ones print faster (e.g. `1024` / `8`). Each piece has its own retries, so a failed piece is resent on its own rather than the whole receipt. Characters are never split across pieces.
+
+#### Retries and reconnecting
+
+When a write fails, `print()` waits `retryDelayMs` and tries again. Writing again on a connection that just dropped rarely works, so before the first retry it closes and reopens the connection to the same printer. If the printer can't be reached, it stops retrying early instead of trying a dead link. Pass `reconnect: false` to retry on the same connection only.
 
 ### `usePrinter` hook
 
@@ -298,14 +317,22 @@ try {
   await print(receipt);
 } catch (err) {
   if (err instanceof NotConnectedError) {
-    // no device connected — show "connect to a printer" UI
+    // no device connected, or the connection was lost and couldn't be
+    // reopened — show "connect to a printer" UI
   }
   if (err instanceof PrintError) {
-    // write failed after all retries — err.cause has the underlying error
-    console.log(err.cause);
+    // write failed after all retries — the message ends with the reason,
+    // e.g. "Failed to print copy 1 of 1 after 3 attempt(s): Broken pipe"
+    showAlert(err.message);
+    console.log(err.cause); // the underlying error
   }
 }
 ```
+
+| Error | When | `message` | `cause` |
+|---|---|---|---|
+| `NotConnectedError` | No device connected, or the native side reports the connection is gone and it couldn't be reopened | Fixed "not connected" text | The native error, if there was one |
+| `PrintError` | Every attempt to write failed | `Failed to print copy X of Y after N attempt(s): <reason>` — `N` is the attempts actually made | The last underlying error |
 
 ---
 
@@ -400,6 +427,8 @@ await disconnect();
 const device = getConnectedDevice(); // BluetoothDevice | null
 const connected = isConnected();     // boolean
 ```
+
+`getConnectedDevice()` and `isConnected()` follow the real connection: when Android reports the printer disconnected (powered off, out of range) the library checks the native side and forgets the device if it's really gone, and turning Bluetooth off forgets it straight away. The next `print()` then throws `NotConnectedError` instead of writing to a dead connection.
 
 #### Bluetooth events
 
@@ -579,6 +608,9 @@ yarn example ios
 - [x] `print()` with copies support
 - [x] Print queue — serial job processing
 - [x] Retry logic — automatic retries with configurable delay
+- [x] Reconnect once before retrying a failed write
+- [x] Chunked writes for long receipts
+- [x] Connection state follows Android disconnect events
 - [x] Print status events — `sending`, `done`, `error`
 - [x] `usePrinter` hook — `isPrinting`, `status`, `error`
 - [ ] Receipt templates
