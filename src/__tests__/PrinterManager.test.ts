@@ -211,6 +211,71 @@ describe('print()', () => {
     });
   });
 
+  describe('error messages', () => {
+    const connect = jest.mocked(BluetoothManager.connect);
+    const disconnect = jest.mocked(BluetoothManager.disconnect);
+    const getConnected = jest.mocked(BluetoothManager.getConnectedDevice);
+    const notConnected = () =>
+      Object.assign(new Error('Not connected to AA:BB:CC:DD:EE:FF'), {
+        code: 'NOT_CURRENTLY_CONNECTED',
+      });
+
+    beforeEach(() => {
+      connect.mockReset().mockResolvedValue(undefined);
+      disconnect.mockReset().mockResolvedValue(undefined);
+      getConnected.mockReset();
+    });
+
+    it('ends the PrintError message with the native reason', async () => {
+      const write = jest
+        .fn()
+        .mockRejectedValue(
+          new Error('Unable to write to device, due to: Broken pipe')
+        );
+      getConnected.mockReturnValue(mockDevice(write));
+
+      await expect(
+        print(receipt, { retries: 2, retryDelayMs: 0 })
+      ).rejects.toThrow(
+        'Failed to print copy 1 of 1 after 3 attempt(s): Unable to write to device, due to: Broken pipe'
+      );
+    });
+
+    it('counts only the attempts actually made when retrying stops early', async () => {
+      const write = jest.fn().mockRejectedValue(new Error('Broken pipe'));
+      connect.mockRejectedValue(new Error('connection failed'));
+      getConnected.mockReturnValue(mockDevice(write));
+
+      await expect(
+        print(receipt, { retries: 2, retryDelayMs: 0 })
+      ).rejects.toThrow('after 1 attempt(s): Broken pipe');
+    });
+
+    it('throws NotConnectedError when the native connection is gone and cannot be reopened', async () => {
+      const lost = notConnected();
+      const write = jest.fn().mockRejectedValue(lost);
+      connect.mockRejectedValue(new Error('connection failed'));
+      getConnected.mockReturnValue(mockDevice(write));
+
+      const err = await print(receipt, { retryDelayMs: 0 }).catch((e) => e);
+
+      expect(err).toBeInstanceOf(NotConnectedError);
+      expect((err as NotConnectedError).cause).toBe(lost);
+    });
+
+    it('prints when the native connection was gone but reopening works', async () => {
+      const deadWrite = jest.fn().mockRejectedValue(notConnected());
+      const freshWrite = jest.fn().mockResolvedValue(undefined);
+      getConnected
+        .mockReturnValueOnce(mockDevice(deadWrite))
+        .mockReturnValue(mockDevice(freshWrite));
+
+      await print(receipt, { retryDelayMs: 0 });
+
+      expect(freshWrite).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('chunked writes', () => {
     const longReceipt: ReceiptData = {
       lines: Array.from({ length: 40 }, (_, i) => ({

@@ -10,19 +10,25 @@ import { emitPrintStatus } from './PrintEvents';
 // ─── Errors ───────────────────────────────────────────────────────────────────
 
 /**
- * Thrown when `print()` is called but no Bluetooth device is connected.
- * The caller should check `isConnected()` or call `connect()` first.
+ * Thrown when `print()` is called but no Bluetooth device is connected, or
+ * when the native side reports the connection is gone and it couldn't be
+ * reopened. The caller should check `isConnected()` or call `connect()` first.
+ * `cause` holds the native error when there was one.
  */
 export class NotConnectedError extends Error {
-  constructor() {
+  readonly cause: unknown;
+
+  constructor(cause?: unknown) {
     super('No Bluetooth device is connected. Call connect() before printing.');
     this.name = 'NotConnectedError';
+    this.cause = cause;
   }
 }
 
 /**
  * Thrown when `print()` fails to write data to the connected device after
- * all retry attempts are exhausted. Wraps the last underlying error.
+ * all retry attempts are exhausted. Wraps the last underlying error, and its
+ * message ends with that error's reason (e.g. "…: Broken pipe").
  */
 export class PrintError extends Error {
   readonly cause: unknown;
@@ -87,6 +93,15 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
+ * Whether a native write error means there's no open connection to the
+ * device (react-native-bluetooth-classic rejects with this code when the
+ * socket was dropped and removed on the native side).
+ */
+function isNotConnectedError(err: unknown): boolean {
+  return (err as { code?: unknown } | null)?.code === 'NOT_CURRENTLY_CONNECTED';
+}
+
+/**
  * Close the current connection and open a fresh one to the same address.
  * Returns the new device, or null if the printer couldn't be reached.
  */
@@ -136,8 +151,9 @@ export function splitPayload(payload: string, chunkSize: number): string[] {
  * - Each copy is sent as a separate write to the device, or in pieces of
  *   `chunkSize` characters (each with its own retries) when that is set.
  *
- * @throws {NotConnectedError} if no device is connected
- * @throws {PrintError}        if all retry attempts fail
+ * @throws {NotConnectedError} if no device is connected, or the connection was
+ *                             lost and could not be reopened
+ * @throws {PrintError}        if all retry attempts fail (message ends with the reason)
  *
  * @example
  * ```ts
@@ -188,9 +204,13 @@ export async function print(
       totalCopies: copies,
     });
 
+    let attemptsMade = 0;
+
     for (let part = 0; part < chunks.length; part++) {
+      attemptsMade = 0;
       // attempt 0 is the first try, attempts 1..retries are the retries
       for (let attempt = 0; attempt <= retries; attempt++) {
+        attemptsMade++;
         try {
           await device.write(chunks[part]!);
           lastError = undefined;
@@ -231,10 +251,16 @@ export async function print(
         error,
       });
 
+      // The native module lost the connection and it couldn't be reopened —
+      // that's "not connected", not a failed print.
+      if (isNotConnectedError(error)) {
+        throw new NotConnectedError(error);
+      }
+
       throw new PrintError(
-        `Failed to print copy ${copyNumber} of ${copies} after ${
-          retries + 1
-        } attempt(s).`,
+        `Failed to print copy ${copyNumber} of ${copies} after ${attemptsMade} attempt(s)${
+          error.message ? `: ${error.message}` : '.'
+        }`,
         error
       );
     }
