@@ -14,3 +14,6 @@ gem 'bigdecimal'
 gem 'logger'
 gem 'benchmark'
 gem 'mutex_m'
+# CFPropertyList (used by CocoaPods/xcodeproj) requires 'kconv', which lives
+# in the nkf gem since Ruby 3.4.
+gem 'nkf'
