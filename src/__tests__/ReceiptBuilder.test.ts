@@ -95,6 +95,22 @@ describe('ReceiptBuilder', () => {
     });
   });
 
+  describe('barcode()', () => {
+    it('sets barcode data and options', () => {
+      const { lines } = new ReceiptBuilder()
+        .barcode('BEE5023C')
+        .barcode('A1', { height: 60, showText: false })
+        .build();
+      expect(lines[0]).toEqual({ type: 'barcode', data: 'BEE5023C' });
+      expect(lines[1]).toEqual({
+        type: 'barcode',
+        data: 'A1',
+        height: 60,
+        showText: false,
+      });
+    });
+  });
+
   describe('cut()', () => {
     it('adds a cut line', () => {
       const { lines } = new ReceiptBuilder().cut().build();
