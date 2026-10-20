@@ -26,7 +26,7 @@ A React Native library for thermal receipt printing over Bluetooth, with built-i
 - **Three-layer API** — raw functions, React hooks, and Context providers. Pick the level that fits your app.
 - **Device discovery** — scan for nearby devices or list already-paired ones.
 - **Connection management** — connect, disconnect, and track connection state reactively.
-- **ESC/POS thermal encoding** — supports text, dividers, spacers, QR codes, and paper cut. 58mm and 80mm paper widths.
+- **ESC/POS thermal encoding** — supports text, dividers, spacers, QR codes, Code 128 barcodes, and paper cut. 58mm and 80mm paper widths.
 - **Fluent receipt builder** — construct receipts with chainable methods or pass a JSON structure from your backend.
 - **Print queue** — jobs are processed one at a time. No corrupted output from concurrent prints.
 - **Retry logic** — automatically retries failed writes before giving up, reopening the connection once if the link dropped. Configurable per print call.
@@ -160,6 +160,7 @@ const receipt = new ReceiptBuilder({ paperWidth: 58 })
   .row('Date:', '2026-04-14')
   .divider()
   .qrCode('https://acme.com/receipt/123')
+  .barcode('BEE5023C')
   .spacer(2)
   .cut()
   .build();
@@ -173,6 +174,7 @@ const receipt = new ReceiptBuilder({ paperWidth: 58 })
 | `.divider(options?)` | Horizontal rule | `char: '-'` |
 | `.spacer(lines?)` | Blank lines | `lines: 1` |
 | `.qrCode(data)` | Centered QR code | |
+| `.barcode(data, options?)` | Centered Code 128 barcode with its text below. Short data only: ~14 characters fit 58mm, ~23 fit 80mm; anything longer (or non-ASCII) prints as centered text instead | `height: 80` dots, `showText: true` |
 | `.cut()` | Paper cut — always last | |
 | `.build()` | Returns `ReceiptData` ready for `encode()` | |
 
@@ -182,6 +184,76 @@ Options you can override on `.header()` and `.text()`:
 .header('ACME RIDES', { align: 'left', bold: false })
 .text('Note', { align: 'center', size: 'large', bold: true })
 ```
+
+### Barcodes
+
+`.barcode(data)` prints a **Code 128** barcode — the 1D barcode used in
+shipping and logistics — centered, with the text printed under the bars.
+The printer draws it itself from the ESC/POS barcode command, so there are no
+images to generate.
+
+```ts
+new ReceiptBuilder({ paperWidth: 58 })
+  .text('Parcel', { align: 'center', bold: true })
+  .barcode('BEE5023C')                                  // bars + "BEE5023C" below
+  .barcode('NRB-0660', { height: 60, showText: false }) // shorter, no text
+  .cut()
+  .build();
+```
+
+**QR code or barcode?**
+
+| | `.qrCode()` | `.barcode()` |
+|---|---|---|
+| Holds | Long text — URLs, JSON, tokens | Short codes only |
+| Read by | 2D scanners, phone cameras | **Any** scanner (1D laser, 2D imager), phone cameras |
+| Use when | Data is long, or every scanner is 2D | Staff use cheap 1D scanners |
+
+**How much fits.** A barcode only grows sideways, so length is limited by the
+paper. Bars are made as thick as the paper allows — 3 dots when they fit
+(easiest to scan), otherwise 2 dots:
+
+| Paper | Printable width | Characters that fit |
+|---|---|---|
+| 58mm | 384 dots | up to ~14 (3-dot bars up to 8) |
+| 80mm | 576 dots | up to ~23 (3-dot bars up to 14) |
+
+Keep codes short — 8–12 characters scan fastest.
+
+**Never a blank label.** Content that can't be a barcode — too long for the
+paper, or characters outside printable ASCII (e.g. `é`) — is printed as
+centered text instead, so the code is still on the receipt.
+
+| Option | Description | Default |
+|---|---|---|
+| `height` | Bar height in printer dots (8 dots ≈ 1mm) | `80` (≈10mm) |
+| `showText` | Print the code under the bars | `true` |
+
+In backend JSON, the same line looks like:
+
+```json
+{ "type": "barcode", "data": "BEE5023C", "height": 80, "showText": true }
+```
+
+**Checking before you print.** Two helpers let your app decide between a
+barcode and a QR code up front:
+
+```ts
+import { isCode128Printable, getBarcodeModuleDots } from 'react-native-receipt-printer';
+
+isCode128Printable('BEE5023C');        // true  — printable ASCII only
+getBarcodeModuleDots('BEE5023C', 384); // 3     — bar width in dots on 58mm
+getBarcodeModuleDots('X'.repeat(20), 384); // 0 — won't fit 58mm
+```
+
+> **Printer support:** Code 128 uses the standard ESC/POS `GS k` command,
+> which almost all thermal receipt printers support. A few very basic models
+> don't — print one test receipt on each new printer model.
+
+> **Upgrading apps:** versions before barcode support don't know the
+> `barcode` line type and print the word `undefined` in its place. Make sure
+> every app that receives barcode lines (including backend-driven receipts)
+> is on a version with barcode support.
 
 ### Backend-driven receipts
 
@@ -603,6 +675,7 @@ yarn example ios
 - [x] Connection management
 - [x] Bluetooth events — connection and radio state changes
 - [x] ESC/POS thermal encoder — text, dividers, spacers, QR codes, paper cut
+- [x] Code 128 barcodes — centered, sized to the paper, with text fallback
 - [x] 58mm / 80mm thermal paper width support
 - [x] Fluent receipt builder
 - [x] `print()` with copies support
