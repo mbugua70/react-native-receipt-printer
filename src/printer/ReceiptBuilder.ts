@@ -31,6 +31,11 @@ type DividerOptions = {
   char?: string;
 };
 
+type BarcodeOptions = {
+  height?: number;
+  showText?: boolean;
+};
+
 // ─── ReceiptBuilder ───────────────────────────────────────────────────────────
 //
 // Fluent builder for constructing a ReceiptData object.
@@ -127,6 +132,19 @@ export class ReceiptBuilder {
     this._lines.push({
       type: 'qrcode',
       data,
+    });
+    return this;
+  }
+
+  /**
+   * A Code 128 barcode printed in the center of the receipt, with its text
+   * underneath. Keep `data` short — about 14 characters fit 58mm paper.
+   */
+  barcode(data: string, options: BarcodeOptions = {}): this {
+    this._lines.push({
+      type: 'barcode',
+      data,
+      ...options,
     });
     return this;
   }

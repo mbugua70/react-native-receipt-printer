@@ -28,6 +28,9 @@ export {
 // ─── Printer ─────────────────────────────────────────────────────────────
 export {
   encode,
+  getBarcodeModuleDots,
+  isCode128Printable,
+  type BarcodeLine,
   type ReceiptData,
   type ReceiptLine,
 } from './printer/EscPosEncoder';

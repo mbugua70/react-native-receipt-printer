@@ -79,13 +79,25 @@ type WidthConfig = {
   charsLarge: number;
   // how long the divider line is
   dividerLength: number;
+  // printable width in dots (8 dots/mm) — bounds how wide a barcode can be
+  printableDots: number;
 };
 
 function getWidthConfig(width: PaperWidth): WidthConfig {
   if (width === 80) {
-    return { charsPerLine: 48, charsLarge: 24, dividerLength: 48 };
+    return {
+      charsPerLine: 48,
+      charsLarge: 24,
+      dividerLength: 48,
+      printableDots: 576,
+    };
   }
-  return { charsPerLine: 32, charsLarge: 16, dividerLength: 32 };
+  return {
+    charsPerLine: 32,
+    charsLarge: 16,
+    dividerLength: 32,
+    printableDots: 384,
+  };
 }
 
 // ─── QR code commands ─────────────────────────────────────────────────────────
@@ -116,6 +128,58 @@ function buildQrCommands(content: string): string {
   // Print the QR code stored in memory
   cmd += GS + '(k' + String.fromCharCode(3, 0, 49, 81, 48);
 
+  return cmd;
+}
+
+// ─── Barcode commands (Code 128) ──────────────────────────────────────────────
+// GS k m=73 — print a Code 128 barcode. The printer adds the start, check
+// and stop symbols itself; we only choose bar size, the text underneath, and
+// the data (prefixed with "{B" to select code set B: printable ASCII).
+//
+// Each Code 128 symbol is 11 modules wide, plus 35 for start/check/stop. Bars
+// are as wide as fit (up to 3 dots — easier to scan), never below 2 dots.
+
+const BARCODE_MIN_MODULE_DOTS = 2;
+const BARCODE_MAX_MODULE_DOTS = 3;
+const BARCODE_DEFAULT_HEIGHT = 80; // dots ≈ 10mm
+
+/** Code set B covers printable ASCII only (space through "~"). */
+export function isCode128Printable(content: string): boolean {
+  return /^[\x20-\x7E]+$/.test(content);
+}
+
+/** Bar width in dots for `content`, or 0 when it can't fit the paper. */
+export function getBarcodeModuleDots(
+  content: string,
+  printableDots: number
+): number {
+  const modules = content.length * 11 + 35;
+  for (
+    let dots = BARCODE_MAX_MODULE_DOTS;
+    dots >= BARCODE_MIN_MODULE_DOTS;
+    dots--
+  ) {
+    if (modules * dots <= printableDots) return dots;
+  }
+  return 0;
+}
+
+function buildBarcodeCommands(
+  content: string,
+  moduleDots: number,
+  height: number,
+  showText: boolean
+): string {
+  // "{" is the code-set escape inside GS k data — a literal one is "{{".
+  const data = '{B' + content.replace(/\{/g, '{{');
+
+  let cmd = '';
+  cmd += GS + 'h' + String.fromCharCode(Math.max(1, Math.min(255, height)));
+  cmd += GS + 'w' + String.fromCharCode(moduleDots);
+  // HRI (the human-readable text): 2 = below the bars, 0 = none; font A.
+  cmd += GS + 'H' + String.fromCharCode(showText ? 2 : 0);
+  cmd += GS + 'f' + String.fromCharCode(0);
+  cmd += GS + 'k' + String.fromCharCode(73, data.length) + data;
   return cmd;
 }
 
@@ -195,6 +259,23 @@ export type QrCodeLine = {
   data: string;
 };
 
+/**
+ * A Code 128 barcode, centred, with its text printed underneath.
+ *
+ * - `height`   — bar height in dots (default 80 ≈ 10mm)
+ * - `showText` — print the text under the bars (default: true)
+ *
+ * Content that isn't printable ASCII, or too long to fit the paper at a
+ * scannable bar width, is printed as plain centred text instead so the
+ * label still carries the code.
+ */
+export type BarcodeLine = {
+  type: 'barcode';
+  data: string;
+  height?: number;
+  showText?: boolean;
+};
+
 /** Paper cut — always the last line of a receipt */
 export type CutLine = {
   type: 'cut';
@@ -206,6 +287,7 @@ export type ReceiptLine =
   | DividerLine
   | SpacerLine
   | QrCodeLine
+  | BarcodeLine
   | CutLine;
 
 // ─── Receipt data ─────────────────────────────────────────────────────────────
@@ -274,9 +356,42 @@ function encodeLine(
       return ALIGN_CENTER + buildQrCommands(line.data) + LF + ALIGN_LEFT;
     }
 
+    case 'barcode':
+      return encodeBarcode(line, widthCfg);
+
     case 'cut':
       return CUT;
   }
+}
+
+// ─── encodeBarcode ────────────────────────────────────────────────────────────
+//
+// Centred like the QR block. Falls back to centred text when the content
+// can't be a barcode on this paper, rather than printing nothing.
+
+function encodeBarcode(line: BarcodeLine, widthCfg: WidthConfig): string {
+  const content = line.data ?? '';
+  if (!content) return '';
+
+  const moduleDots = isCode128Printable(content)
+    ? getBarcodeModuleDots(content, widthCfg.printableDots)
+    : 0;
+
+  if (!moduleDots) {
+    return ALIGN_CENTER + content + LF + ALIGN_LEFT;
+  }
+
+  return (
+    ALIGN_CENTER +
+    buildBarcodeCommands(
+      content,
+      moduleDots,
+      line.height ?? BARCODE_DEFAULT_HEIGHT,
+      line.showText ?? true
+    ) +
+    LF +
+    ALIGN_LEFT
+  );
 }
 
 // ─── encodeText ───────────────────────────────────────────────────────────────
