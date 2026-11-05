@@ -113,21 +113,25 @@ static BOOL IsKnownFormat(NSData *data)
   if (n >= 12 && b[0] == 0x52 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x46 &&
       b[8] == 0x57 && b[9] == 0x45 && b[10] == 0x42 && b[11] == 0x50) return YES;         // WEBP
   if (n >= 2 && b[0] == 0x42 && b[1] == 0x4D) return YES;                                 // BMP
+  if (n >= 4 && b[0] == 0 && b[1] == 0 && b[2] == 0x01 && b[3] == 0) return YES;          // ICO
   if (n >= 8 && b[4] == 0x66 && b[5] == 0x74 && b[6] == 0x79 && b[7] == 0x70) return YES; // HEIF
   return NO;
 }
 
+// The OS decides what it can decode; the signature check only words the error.
+static NSError *DecodeFailure(NSData *data)
+{
+  return IsKnownFormat(data)
+      ? ImageError(@"DECODE_FAILED", @"The image is corrupted or could not be decoded.")
+      : ImageError(@"UNSUPPORTED_FORMAT", @"Not a supported image format (use PNG or JPEG).");
+}
+
 static NSDictionary *DecodeToGray(NSData *data, NSInteger minWidth, NSError **error)
 {
-  if (!IsKnownFormat(data)) {
-    *error = ImageError(@"UNSUPPORTED_FORMAT",
-                        @"Not a supported image format (use PNG, JPEG, WEBP, GIF or BMP).");
-    return nil;
-  }
-
   CGImageSourceRef imageSource = CGImageSourceCreateWithData((__bridge CFDataRef)data, NULL);
-  if (!imageSource) {
-    *error = ImageError(@"DECODE_FAILED", @"The image is corrupted or could not be decoded.");
+  if (!imageSource || CGImageSourceGetCount(imageSource) == 0) {
+    if (imageSource) CFRelease(imageSource);
+    *error = DecodeFailure(data);
     return nil;
   }
 
@@ -143,7 +147,7 @@ static NSDictionary *DecodeToGray(NSData *data, NSInteger minWidth, NSError **er
   }
   if (w0 <= 0 || h0 <= 0) {
     CFRelease(imageSource);
-    *error = ImageError(@"DECODE_FAILED", @"The image is corrupted or could not be decoded.");
+    *error = DecodeFailure(data);
     return nil;
   }
 
@@ -163,7 +167,7 @@ static NSDictionary *DecodeToGray(NSData *data, NSInteger minWidth, NSError **er
       CGImageSourceCreateThumbnailAtIndex(imageSource, 0, (__bridge CFDictionaryRef)thumbOptions);
   CFRelease(imageSource);
   if (!image) {
-    *error = ImageError(@"DECODE_FAILED", @"The image is corrupted or could not be decoded.");
+    *error = DecodeFailure(data);
     return nil;
   }
 

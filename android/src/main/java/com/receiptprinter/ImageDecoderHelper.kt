@@ -38,7 +38,6 @@ class ImageDecoderHelper(private val context: Context) {
       "uri" -> loadUri(source)
       else -> throw DecodeException("INVALID_SOURCE", "Unknown image source type \"$sourceType\".")
     }
-    checkFormat(bytes)
     return toGray(bytes, minWidth.coerceAtLeast(1))
   }
 
@@ -132,28 +131,36 @@ class ImageDecoderHelper(private val context: Context) {
 
   // ─── Decoding ─────────────────────────────────────────────────────────────
 
-  /** Reject bytes that aren't a known image format before trying to decode. */
-  private fun checkFormat(b: ByteArray) {
+  /**
+   * Whether the bytes start like an image format we know. Only used to word
+   * the error once decoding has failed: the OS decides what it can read (it
+   * also handles formats like ICO that aren't listed here).
+   */
+  private fun looksLikeImage(b: ByteArray): Boolean {
     fun at(i: Int, vararg v: Int) = b.size >= i + v.size && v.indices.all { (b[i + it].toInt() and 0xff) == v[it] }
     val known = at(0, 0x89, 0x50, 0x4E, 0x47) || // PNG
       at(0, 0xFF, 0xD8, 0xFF) || // JPEG
       at(0, 0x47, 0x49, 0x46) || // GIF
       (at(0, 0x52, 0x49, 0x46, 0x46) && at(8, 0x57, 0x45, 0x42, 0x50)) || // WEBP
       at(0, 0x42, 0x4D) || // BMP
+      at(0, 0x00, 0x00, 0x01, 0x00) || // ICO
       at(4, 0x66, 0x74, 0x79, 0x70) // HEIF / AVIF (ftyp)
-    if (!known) {
-      throw DecodeException("UNSUPPORTED_FORMAT", "Not a supported image format (use PNG, JPEG, WEBP, GIF or BMP).")
-    }
+    return known
   }
+
+  private fun decodeFailure(bytes: ByteArray): DecodeException =
+    if (looksLikeImage(bytes)) {
+      DecodeException("DECODE_FAILED", "The image is corrupted or could not be decoded.")
+    } else {
+      DecodeException("UNSUPPORTED_FORMAT", "Not a supported image format (use PNG or JPEG).")
+    }
 
   private fun toGray(bytes: ByteArray, minWidth: Int): GrayImage {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
     val w0 = bounds.outWidth
     val h0 = bounds.outHeight
-    if (w0 <= 0 || h0 <= 0) {
-      throw DecodeException("DECODE_FAILED", "The image is corrupted or could not be decoded.")
-    }
+    if (w0 <= 0 || h0 <= 0) throw decodeFailure(bytes)
 
     // Halve while the result stays at least minWidth wide, then keep halving
     // if it's still too many pixels to hold comfortably.
@@ -169,7 +176,7 @@ class ImageDecoderHelper(private val context: Context) {
       BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
     } catch (e: OutOfMemoryError) {
       throw DecodeException("TOO_LARGE", "Not enough memory to decode the image.")
-    } ?: throw DecodeException("DECODE_FAILED", "The image is corrupted or could not be decoded.")
+    } ?: throw decodeFailure(bytes)
 
     try {
       val w = bitmap.width
