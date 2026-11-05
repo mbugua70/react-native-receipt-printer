@@ -27,6 +27,7 @@ A React Native library for thermal receipt printing over Bluetooth, with built-i
 - **Device discovery** — scan for nearby devices or list already-paired ones.
 - **Connection management** — connect, disconnect, and track connection state reactively.
 - **ESC/POS thermal encoding** — supports text, dividers, spacers, QR codes, Code 128 barcodes, and paper cut. 58mm and 80mm paper widths.
+- **Images and logos** — print PNG/JPEG logos from URLs, files, base64 or bundled assets anywhere in the receipt, sized in printer dots, dithered to black and white, and cached.
 - **Fluent receipt builder** — construct receipts with chainable methods or pass a JSON structure from your backend.
 - **Print queue** — jobs are processed one at a time. No corrupted output from concurrent prints.
 - **Retry logic** — automatically retries failed writes before giving up, reopening the connection once if the link dropped. Configurable per print call.
@@ -255,6 +256,139 @@ getBarcodeModuleDots('X'.repeat(20), 384); // 0 — won't fit 58mm
 > every app that receives barcode lines (including backend-driven receipts)
 > is on a version with barcode support.
 
+### Images and logos
+
+Print a logo or any picture anywhere in a receipt. It prints exactly where you put it in the builder (or in the `lines` array), between any other lines:
+
+```ts
+const receipt = new ReceiptBuilder({ paperWidth: 58 })
+  .image(require('./assets/logo.png'), { width: 240 }) // centered by default
+  .header('ACME RIDES')
+  .divider()
+  .row('Waybill', 'NRB-0699')
+  .image('https://example.com/stamp.png', { width: 120, align: 'right' })
+  .qrCode('NRB-0699')
+  .cut()
+  .build();
+
+await print(receipt); // loads, converts and caches the images, then prints
+```
+
+> **Thermal printers print black and white only.** Colours become black or white.
+> Logos with bold shapes and high contrast print best; thin lines and pale
+> colours may disappear. Tune `threshold`, or use a dithering mode for photos.
+
+#### Image sources
+
+| Source | Example |
+|---|---|
+| HTTPS / HTTP URL | `'https://example.com/logo.png'` |
+| Local file | `'file:///data/user/0/…/logo.png'`, Android `'content://…'` |
+| Base64 data URI | `'data:image/png;base64,iVBORw0…'` |
+| Raw base64 | `{ base64: 'iVBORw0…' }` |
+| Bundled asset | `require('./assets/logo.png')` |
+| Prepared bitmap | the result of `prepareImage()`, or `{ width, height, data }` (see below) |
+
+PNG and JPEG work everywhere. WEBP, GIF (first frame), BMP and HEIF depend on what the phone's OS can decode. Transparent areas print as white.
+
+#### Size and alignment
+
+Sizes are in **printer dots**. Common 203 DPI printers print 8 dots per mm:
+
+| Paper | Printable width | Good logo width |
+|---|---|---|
+| 58mm | 384 dots (48mm) | 200–300 dots |
+| 80mm | 576 dots (72mm) | 300–450 dots |
+
+Some printers have a different printable width (e.g. 512 dots on some 80mm models, or 360 on some 58mm ones). Set it on the receipt so images and barcodes are sized for your printer:
+
+```ts
+new ReceiptBuilder({ paperWidth: 80, printableDots: 512 });
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `width` | image's own width | Width in dots |
+| `height` | follows `width` | Height in dots. The aspect ratio is kept unless you set both with `fit: 'stretch'` |
+| `fit` | `'contain'` | With both `width` and `height`: `'contain'` fits inside the box, `'stretch'` uses both exactly |
+| `align` | `'center'` | `'left'`, `'center'` or `'right'` |
+| `overflow` | `'shrink'` | Image wider than the paper: `'shrink'` scales it down to fit, `'error'` throws `ImageError` (`TOO_LARGE`) |
+| `dither` | `'threshold'` | `'threshold'` (sharpest — logos and text), `'floyd-steinberg'` (photos, gradients), `'atkinson'` (lighter, cleaner highlights) |
+| `threshold` | `128` | 0–255. Pixels darker than this print black. Raise it if a pale logo disappears; lower it if it prints too heavy |
+| `invert` | `false` | Swap black and white |
+| `cacheKey` | — | Change it when the image behind the same URL changes (e.g. `'v2'`) |
+
+Alignment is done by padding the image with white, so it lines up the same way on every printer.
+
+#### Backend-driven images
+
+An image is just another line type, so JSON receipts can include it:
+
+```json
+{
+  "paperWidth": 58,
+  "lines": [
+    { "type": "image", "source": "https://example.com/logo.png", "width": 240, "align": "center", "dither": "threshold" },
+    { "type": "text", "content": "ACME RIDES", "align": "center", "size": "large", "bold": true },
+    { "type": "cut" }
+  ]
+}
+```
+
+A backend can also send a ready-made 1-bit bitmap, which prints with no decoding: `"source": { "width": 240, "height": 80, "data": "<base64>" }`. Rows are packed 8 pixels per byte, most significant bit first, 1 = black, and each row is `ceil(width / 8)` bytes.
+
+#### Reusing logos (caching and preprocessing)
+
+Processed images are cached in memory (least recently used first, up to 512KB and 32 images by default), and the cache key includes the image and every size and dithering option. So printing the same logo again doesn't download or convert it again. To skip even the first delay, prepare logos when the app starts:
+
+```ts
+import { prepareImage, configureImageCache, clearImageCache } from 'react-native-receipt-printer';
+
+const logo = await prepareImage('https://example.com/logo.png', {
+  width: 240,
+  printableDots: 384, // the paper the logo will print on
+});
+
+new ReceiptBuilder().image(logo).header('ACME RIDES').cut().build();
+
+configureImageCache({ maxBytes: 256 * 1024, maxEntries: 16 }); // lower memory use
+clearImageCache(); // e.g. after the logo changes on the server
+```
+
+`encode()` returns a text string and can't carry image bytes, so it throws `ImageError` (`NOT_PREPARED`) for image lines. To get the raw bytes yourself, use `encodeBytes(await prepareReceipt(data))`.
+
+#### Printer compatibility
+
+Images print with the standard ESC/POS raster command `GS v 0`, sent in bands of 32 rows. Most modern thermal printers support it. For older printers that print nothing or garbage for images, switch to the older `ESC *` bit-image command:
+
+```ts
+new ReceiptBuilder({ imageMode: 'bitImage' });
+```
+
+Not every printer supports every image command, so print a test receipt on each new printer model.
+
+#### Performance tips
+
+- Size logos close to the width you print them at. A 2000px logo works, but takes longer to download and decode the first time.
+- Prepare frequently used logos once with `prepareImage()`.
+- Image data is much larger than text: a full-width 58mm logo 120 dots tall is about 5.8KB. If a printer stalls or drops the connection during images, send in pieces: `print(receipt, { chunkSize: 1024, chunkDelayMs: 20 })`, and/or use smaller bands: `new ReceiptBuilder({ imageBandHeight: 16 })`.
+
+#### Troubleshooting
+
+| Symptom | Try |
+|---|---|
+| Garbage characters instead of the image | `imageMode: 'bitImage'` |
+| Image cut off, or the printer stops partway | `chunkSize: 512, chunkDelayMs: 30`, or `imageBandHeight: 16` |
+| Logo too pale / parts missing | Raise `threshold` (e.g. `170`) |
+| Logo too heavy / blotchy | Lower `threshold`, or use `dither: 'atkinson'` |
+| Image off-centre or too wide | Set `printableDots` to your printer's real printable width |
+| `ImageError` `NATIVE_UNAVAILABLE` | The app was built with an older version of this library. Rebuild the app (a new APK / IPA); new JavaScript alone isn't enough |
+
+> **Upgrading apps:** image printing needs the library's native code, so apps
+> must be rebuilt after upgrading. Versions before image support don't know
+> the `image` line type, so make sure every app that receives image lines
+> from a backend is on a version with image support.
+
 ### Backend-driven receipts
 
 If your backend returns receipt data, pass it directly to `encode()` — no builder needed:
@@ -266,6 +400,8 @@ const data = await fetch('/api/receipt/123').then(r => r.json());
 
 encode(data); // → raw ESC/POS string
 ```
+
+For receipts that contain `image` lines, pass the data to `print()` (or `encodeBytes(await prepareReceipt(data))`). Images have to be loaded first, and their bytes can't go into the `encode()` string.
 
 ### Printing
 
@@ -287,7 +423,7 @@ await print(manifest, { chunkSize: 512, chunkDelayMs: 20 }); // long receipt in 
 | `copies` | `number` | `1` | How many receipts to print |
 | `retries` | `number` | `2` | How many times to retry a failed write |
 | `retryDelayMs` | `number` | `500` | Milliseconds between retry attempts |
-| `chunkSize` | `number` | `0` | Send each copy in pieces of at most this many characters. `0` sends the whole copy in one write |
+| `chunkSize` | `number` | `0` | Send each copy in pieces of at most this many characters (bytes for receipts with images). `0` sends the whole copy in one write |
 | `chunkDelayMs` | `number` | `0` | Milliseconds to pause between pieces when `chunkSize` is set |
 | `reconnect` | `boolean` | `true` | After the first failed write, close and reopen the connection to the same printer (once per print) before retrying |
 
@@ -405,6 +541,21 @@ try {
 |---|---|---|---|
 | `NotConnectedError` | No device connected, or the native side reports the connection is gone and it couldn't be reopened | Fixed "not connected" text | The native error, if there was one |
 | `PrintError` | Every attempt to write failed | `Failed to print copy X of Y after N attempt(s): <reason>` — `N` is the attempts actually made | The last underlying error |
+| `ImageError` | An image couldn't be loaded or processed. Thrown **before anything is sent**, so a receipt never prints with a missing image | Describes the problem | The native error, if there was one |
+
+`ImageError.code` is one of `INVALID_SOURCE`, `NETWORK`, `UNSUPPORTED_FORMAT`, `DECODE_FAILED`, `INVALID_DIMENSIONS`, `TOO_LARGE`, `NATIVE_UNAVAILABLE`, `NOT_PREPARED`:
+
+```ts
+import { ImageError } from 'react-native-receipt-printer';
+
+try {
+  await print(receipt);
+} catch (err) {
+  if (err instanceof ImageError && err.code === 'NETWORK') {
+    // logo couldn't be downloaded — retry later, or print without it
+  }
+}
+```
 
 ---
 
@@ -645,6 +796,7 @@ A fully working demo app is included in the [`example/`](./example) directory. I
 | Live device scanning with real-time results | `scan()` + `discoveredDevices` |
 | Connect / disconnect to a device | `connect(address)` / `disconnect()` |
 | Live event log — connection + radio state changes | `EventLog` component + `onConnectionChange` / `onBluetoothStateChange` |
+| Image printing — logo at top, images between sections, 58mm / 80mm, backend JSON, cached repeat prints | `ImagePrintSection` component |
 
 **Run it yourself:**
 
@@ -686,6 +838,7 @@ yarn example ios
 - [x] Connection state follows Android disconnect events
 - [x] Print status events — `sending`, `done`, `error`
 - [x] `usePrinter` hook — `isPrinting`, `status`, `error`
+- [x] Images and logos — any position, dithering, caching, `GS v 0` / `ESC *`
 - [ ] Receipt templates
 
 ---

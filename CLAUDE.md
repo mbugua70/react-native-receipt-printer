@@ -67,7 +67,13 @@ The JS–native bridge works as follows:
 
 ### Current implementation state
 
-The library is scaffolded but not yet functional. All native modules currently expose only the placeholder `multiply(a, b)` stub from `create-react-native-library`. `react-native-bluetooth-classic` is installed as a runtime dependency but is not yet wired into any native or JS code. Actual Bluetooth discovery, connection, and ESC/POS printing logic still needs to be implemented.
+Bluetooth (via `react-native-bluetooth-classic`), the ESC/POS encoder, `ReceiptBuilder`, `print()` with retries/chunking/reconnect, the print queue and hooks are implemented in JS. The native module's only real job is image decoding (`decodeImage`).
+
+### Image printing
+
+- `src/printer/image/`: native decode (`NativeImageDecoder.ts`, which returns grayscale) → JS resize, dither and pack (`ImageProcessor.ts`) → `GS v 0` / `ESC *` bands (`RasterEncoder.ts`), with an LRU cache (`ImageCache.ts`). `ImageResolver.ts` holds `prepareImage` / `prepareReceipt`.
+- Native decoding lives in `android/.../ImageDecoderHelper.kt` and `ios/ReceiptPrinter.mm`.
+- Binary safety: `device.write(str)` UTF-8-encodes strings, which corrupts bytes ≥ 0x80. Receipts **with** images go through `encodeBytes()` and are written as latin1 strings with the `'latin1'` encoding. Receipts **without** images keep the original `encode()` string path byte-for-byte, so don't change that path casually.
 
 ### Release
 

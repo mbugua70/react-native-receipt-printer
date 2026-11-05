@@ -4,7 +4,14 @@ import {
   getConnectedDevice,
   type BluetoothDevice,
 } from '../bluetooth/BluetoothManager';
-import { encode, type ReceiptData } from './EscPosEncoder';
+import {
+  encode,
+  encodeBytes,
+  hasImageLines,
+  type ReceiptData,
+} from './EscPosEncoder';
+import { bytesToLatin1 } from './image/binary';
+import { prepareReceipt } from './image/ImageResolver';
 import { emitPrintStatus } from './PrintEvents';
 
 // ─── Errors ───────────────────────────────────────────────────────────────────
@@ -67,6 +74,9 @@ export type PrintOptions = {
    * write. Some printers (e.g. POS built-in ones) print short receipts fine
    * but drop the connection on one long write. Each piece gets its own
    * retries. Default: 0 — the whole copy in a single write.
+   *
+   * For receipts with images the pieces are measured in bytes. Image data is
+   * large — 512–2048 is a good starting point if a printer stalls on logos.
    */
   chunkSize?: number;
 
@@ -141,6 +151,36 @@ export function splitPayload(payload: string, chunkSize: number): string[] {
   return chunks;
 }
 
+/** Split raw bytes into pieces of at most `chunkSize` bytes (0 = one piece). */
+export function splitBytes(bytes: Uint8Array, chunkSize: number): Uint8Array[] {
+  if (!(chunkSize > 0) || bytes.length <= chunkSize) return [bytes];
+  const chunks: Uint8Array[] = [];
+  for (let start = 0; start < bytes.length; start += chunkSize) {
+    chunks.push(bytes.subarray(start, start + chunkSize));
+  }
+  return chunks;
+}
+
+/**
+ * What gets written for one copy. Receipts without images keep the original
+ * text path untouched; receipts with images are loaded first (so a bad image
+ * fails before anything prints) and sent as latin1 strings, which the
+ * Bluetooth library turns back into the exact bytes — no UTF-8 mangling.
+ */
+async function buildPayloads(
+  data: ReceiptData,
+  chunkSize: number
+): Promise<{ chunks: string[]; encoding?: 'latin1' }> {
+  if (!hasImageLines(data)) {
+    return { chunks: splitPayload(encode(data), chunkSize) };
+  }
+  const bytes = encodeBytes(await prepareReceipt(data));
+  return {
+    chunks: splitBytes(bytes, chunkSize).map(bytesToLatin1),
+    encoding: 'latin1',
+  };
+}
+
 // ─── print() ──────────────────────────────────────────────────────────────────
 
 /**
@@ -154,6 +194,8 @@ export function splitPayload(payload: string, chunkSize: number): string[] {
  * @throws {NotConnectedError} if no device is connected, or the connection was
  *                             lost and could not be reopened
  * @throws {PrintError}        if all retry attempts fail (message ends with the reason)
+ * @throws {ImageError}        if an image can't be loaded or processed — thrown
+ *                             before anything is sent to the printer
  *
  * @example
  * ```ts
@@ -192,7 +234,7 @@ export async function print(
 
   let hasReconnected = false;
 
-  const chunks = splitPayload(encode(data), chunkSize);
+  const { chunks, encoding } = await buildPayloads(data, chunkSize);
 
   for (let copy = 0; copy < copies; copy++) {
     const copyNumber = copy + 1;
@@ -212,7 +254,8 @@ export async function print(
       for (let attempt = 0; attempt <= retries; attempt++) {
         attemptsMade++;
         try {
-          await device.write(chunks[part]!);
+          if (encoding) await device.write(chunks[part]!, encoding);
+          else await device.write(chunks[part]!);
           lastError = undefined;
           break; // success — move on to the next piece
         } catch (err) {
