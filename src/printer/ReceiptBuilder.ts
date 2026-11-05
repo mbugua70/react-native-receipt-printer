@@ -6,12 +6,23 @@ import type {
   ReceiptLine,
   Size,
 } from './EscPosEncoder';
+import type {
+  ImageMode,
+  ImageProcessingOptions,
+  ImageSource,
+} from './image/types';
 
 // ─── Builder config ───────────────────────────────────────────────────────────
 
 type BuilderConfig = {
   paperWidth?: PaperWidth;
   printerProfile?: PrinterProfile;
+  /** Printable width in dots, when the printer differs from 384 (58mm) / 576 (80mm). */
+  printableDots?: number;
+  /** 'raster' (GS v 0, default) or 'bitImage' (ESC *) for older printers. */
+  imageMode?: ImageMode;
+  /** Rows per image command (default 32). */
+  imageBandHeight?: number;
 };
 
 // ─── Per-method option types ──────────────────────────────────────────────────
@@ -34,6 +45,10 @@ type DividerOptions = {
 type BarcodeOptions = {
   height?: number;
   showText?: boolean;
+};
+
+type ImageOptions = ImageProcessingOptions & {
+  align?: Align;
 };
 
 // ─── ReceiptBuilder ───────────────────────────────────────────────────────────
@@ -150,6 +165,30 @@ export class ReceiptBuilder {
   }
 
   /**
+   * An image — e.g. a logo — printed in black and white at this point in
+   * the receipt. Width and height are in printer dots (384 across 58mm
+   * paper, 576 across 80mm); the aspect ratio is kept unless you pass both
+   * with `fit: 'stretch'`. Default alignment: center.
+   *
+   * The image is loaded when the receipt is printed (and cached), or pass a
+   * bitmap from `prepareImage()` to skip loading entirely.
+   *
+   * @example
+   * ```ts
+   * builder.image('https://example.com/logo.png', { width: 240 });
+   * builder.image(require('./logo.png'), { width: 200, align: 'left' });
+   * ```
+   */
+  image(source: ImageSource, options: ImageOptions = {}): this {
+    this._lines.push({
+      type: 'image',
+      source,
+      ...options,
+    });
+    return this;
+  }
+
+  /**
    * Paper cut — should be the last call before build().
    */
   cut(): this {
@@ -162,10 +201,16 @@ export class ReceiptBuilder {
    * Each call returns a new object — the builder can be reused.
    */
   build(): ReceiptData {
-    return {
+    const data: ReceiptData = {
       lines: [...this._lines],
       paperWidth: this._config.paperWidth,
       printerProfile: this._config.printerProfile,
     };
+    // Only set when given, so existing receipts keep exactly the same shape
+    const { printableDots, imageMode, imageBandHeight } = this._config;
+    if (printableDots !== undefined) data.printableDots = printableDots;
+    if (imageMode !== undefined) data.imageMode = imageMode;
+    if (imageBandHeight !== undefined) data.imageBandHeight = imageBandHeight;
+    return data;
   }
 }

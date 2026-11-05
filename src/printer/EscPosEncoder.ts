@@ -1,3 +1,16 @@
+import { concatBytes, utf8Bytes } from './image/binary';
+import { ImageError } from './image/ImageError';
+import {
+  isMonochromeBitmap,
+  validatePrintableDots,
+} from './image/ImageProcessor';
+import { DEFAULT_IMAGE_BAND_HEIGHT, encodeImage } from './image/RasterEncoder';
+import type {
+  ImageMode,
+  ImageProcessingOptions,
+  ImageSource,
+} from './image/types';
+
 // ─── ESC/POS command constants ────────────────────────────────────────────────
 //
 // Thermal printers speak ESC/POS — a set of escape sequences that control
@@ -276,6 +289,24 @@ export type BarcodeLine = {
   showText?: boolean;
 };
 
+/**
+ * An image, e.g. a logo — printed in black and white wherever it sits in
+ * the line list.
+ *
+ * - `source` — URL, file/content URI, data URI, `{ base64 }`, bundled asset
+ *              (`require(...)`), or a bitmap from `prepareImage()`
+ * - `align`  — default: center
+ * - `width` / `height` — in printer dots; aspect ratio kept by default
+ *
+ * See `ImageProcessingOptions` for dithering and sizing. Images are loaded
+ * by `print()`; `encode()` can't carry image bytes (use `encodeBytes()`).
+ */
+export type ImageLine = {
+  type: 'image';
+  source: ImageSource;
+  align?: Align;
+} & ImageProcessingOptions;
+
 /** Paper cut — always the last line of a receipt */
 export type CutLine = {
   type: 'cut';
@@ -288,6 +319,7 @@ export type ReceiptLine =
   | SpacerLine
   | QrCodeLine
   | BarcodeLine
+  | ImageLine
   | CutLine;
 
 // ─── Receipt data ─────────────────────────────────────────────────────────────
@@ -298,12 +330,36 @@ export type ReceiptLine =
  * - `lines`          — the content lines (from backend or ReceiptBuilder)
  * - `paperWidth`     — 58mm or 80mm (default: 58)
  * - `printerProfile` — 'generic' or 'c30' (default: 'generic')
+ * - `printableDots`  — the printer's printable width in dots, for printers that
+ *                      differ from the default (384 on 58mm, 576 on 80mm).
+ *                      Bounds images and barcodes; text layout is unchanged.
+ * - `imageMode`      — 'raster' (GS v 0, default) or 'bitImage' (ESC *) for
+ *                      printers that don't support raster images
+ * - `imageBandHeight` — rows per image command (default 32); lower it if a
+ *                      printer drops data or stalls on images
  */
 export type ReceiptData = {
   lines: ReceiptLine[];
   paperWidth?: PaperWidth;
   printerProfile?: PrinterProfile;
+  printableDots?: number;
+  imageMode?: ImageMode;
+  imageBandHeight?: number;
 };
+
+/** The printable width in dots this receipt's images and barcodes must fit. */
+export function getPrintableDots(data: Omit<ReceiptData, 'lines'>): number {
+  if (data.printableDots !== undefined) {
+    validatePrintableDots(data.printableDots);
+    return data.printableDots;
+  }
+  return getWidthConfig(data.paperWidth ?? 58).printableDots;
+}
+
+/** Whether any line of the receipt is an image. */
+export function hasImageLines(data: ReceiptData): boolean {
+  return data.lines.some((line) => line.type === 'image');
+}
 
 // ─── encode() — main function signature ──────────────────────────────────────
 //
@@ -314,7 +370,17 @@ export function encode(data: ReceiptData): string {
   const profile = data.printerProfile ?? 'generic';
   const width = data.paperWidth ?? 58;
   const size = getSizeCommands(profile);
-  const widthCfg = getWidthConfig(width);
+  const widthCfg = {
+    ...getWidthConfig(width),
+    printableDots: getPrintableDots(data),
+  };
+
+  if (hasImageLines(data)) {
+    throw new ImageError(
+      'NOT_PREPARED',
+      'encode() returns a text string and cannot carry image bytes. Use print(), or encodeBytes(await prepareReceipt(data)).'
+    );
+  }
 
   let output = '';
 
@@ -359,9 +425,72 @@ function encodeLine(
     case 'barcode':
       return encodeBarcode(line, widthCfg);
 
+    case 'image':
+      // Handled by encodeBytes() — never reached from encode()
+      throw new ImageError('NOT_PREPARED', 'Image lines need encodeBytes().');
+
     case 'cut':
       return CUT;
   }
+}
+
+// ─── encodeBytes() — binary-safe output ──────────────────────────────────────
+//
+// Same output as encode(), as bytes: text lines are UTF-8 encoded (exactly
+// what writing the encode() string sends today), image lines are raw raster
+// bytes. Every image line must already hold a bitmap — run prepareReceipt()
+// first (print() does this for you).
+
+/**
+ * Encode a receipt to raw ESC/POS bytes, including images.
+ *
+ * For a receipt without images the bytes are identical to the UTF-8
+ * encoding of `encode(data)`.
+ *
+ * @throws {ImageError} `NOT_PREPARED` if an image line still holds a URL /
+ *                      base64 / asset source rather than a prepared bitmap
+ */
+export function encodeBytes(data: ReceiptData): Uint8Array {
+  const profile = data.printerProfile ?? 'generic';
+  const size = getSizeCommands(profile);
+  const printableDots = getPrintableDots(data);
+  const widthCfg = {
+    ...getWidthConfig(data.paperWidth ?? 58),
+    printableDots,
+  };
+  const mode = data.imageMode ?? 'raster';
+  const bandHeight = data.imageBandHeight ?? DEFAULT_IMAGE_BAND_HEIGHT;
+
+  const parts: Uint8Array[] = [];
+  let text = '';
+
+  for (const line of data.lines) {
+    if (line.type !== 'image') {
+      text += encodeLine(line, size, widthCfg);
+      continue;
+    }
+    if (!isMonochromeBitmap(line.source)) {
+      throw new ImageError(
+        'NOT_PREPARED',
+        'Image line has not been prepared. Call prepareReceipt() before encodeBytes().'
+      );
+    }
+    if (text) {
+      parts.push(utf8Bytes(text));
+      text = '';
+    }
+    parts.push(
+      encodeImage(line.source, {
+        align: line.align ?? 'center',
+        printableDots,
+        mode,
+        bandHeight,
+      })
+    );
+  }
+  if (text) parts.push(utf8Bytes(text));
+
+  return concatBytes(parts);
 }
 
 // ─── encodeBarcode ────────────────────────────────────────────────────────────

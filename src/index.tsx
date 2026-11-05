@@ -28,12 +28,30 @@ export {
 // ─── Printer ─────────────────────────────────────────────────────────────
 export {
   encode,
+  encodeBytes,
   getBarcodeModuleDots,
   isCode128Printable,
   type BarcodeLine,
+  type ImageLine,
   type ReceiptData,
   type ReceiptLine,
 } from './printer/EscPosEncoder';
+export {
+  ImageError,
+  prepareImage,
+  prepareReceipt,
+  configureImageCache,
+  clearImageCache,
+  getImageCacheStats,
+  type ImageErrorCode,
+  type PrepareImageOptions,
+  type ImageCacheOptions,
+  type DitherMode,
+  type ImageMode,
+  type ImageProcessingOptions,
+  type ImageSource,
+  type MonochromeBitmap,
+} from './printer/image';
 export { ReceiptBuilder } from './printer/ReceiptBuilder';
 export {
   print,

@@ -12,11 +12,24 @@ import {
 import {
   BluetoothPermissionProvider,
   BluetoothProvider,
+  getImageCacheStats,
+  ImageError,
   onBluetoothStateChange,
   onConnectionChange,
+  prepareImage,
+  print,
+  ReceiptBuilder,
   useBluetoothContext,
   useBluetoothPermissionsContext,
+  type MonochromeBitmap,
+  type ReceiptData,
 } from 'react-native-receipt-printer';
+
+// A generic sample logo (transparent background — prints on white paper).
+const SAMPLE_LOGO = require('../assets/sample-logo.png');
+
+// A small public image, used to show remote (HTTPS) sources.
+const REMOTE_IMAGE = 'https://reactnative.dev/img/tiny_logo.png';
 
 // ─── Event log entry type ─────────────────────────────────────────────────────
 
@@ -212,6 +225,155 @@ function EventLog() {
   );
 }
 
+// ─── Image printing demos ─────────────────────────────────────────────────────
+
+type Paper = 58 | 80;
+
+/** 1. Logo at the top of the receipt. */
+function logoTopReceipt(paperWidth: Paper): ReceiptData {
+  return new ReceiptBuilder({ paperWidth })
+    .image(SAMPLE_LOGO, { width: paperWidth === 80 ? 360 : 240 })
+    .header('ACME RIDES')
+    .divider()
+    .row('Waybill', 'NRB-0699')
+    .row('Amount', 'KES 350')
+    .qrCode('NRB-0699')
+    .cut()
+    .build();
+}
+
+/** 2. Images between sections — a remote image above the barcode. */
+function imageBetweenReceipt(paperWidth: Paper): ReceiptData {
+  return new ReceiptBuilder({ paperWidth })
+    .header('ACME RIDES')
+    .row('From', 'Nairobi')
+    .row('To', 'Mombasa')
+    .divider()
+    .image(REMOTE_IMAGE, { width: 96, align: 'left' })
+    .text('Parcel details', { bold: true })
+    .row('Weight', '2.5 kg')
+    .divider()
+    .barcode('NRB-0699')
+    .image(SAMPLE_LOGO, { width: 160, align: 'right', dither: 'atkinson' })
+    .cut()
+    .build();
+}
+
+/** 3. A receipt exactly as a backend might send it. */
+const BACKEND_JSON = `{
+  "paperWidth": 58,
+  "lines": [
+    { "type": "image", "source": "${REMOTE_IMAGE}", "width": 128, "align": "center" },
+    { "type": "text", "content": "BACKEND RECEIPT", "align": "center", "bold": true },
+    { "type": "text", "preText": "Ref", "content": "INV-1042" },
+    { "type": "divider" },
+    { "type": "cut" }
+  ]
+}`;
+
+function ImagePrintSection() {
+  const { isConnected } = useBluetoothContext();
+  const [paper, setPaper] = useState<Paper>(58);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState('Connect a printer, then try a demo.');
+
+  const run = async (label: string, job: () => Promise<void>) => {
+    setBusy(true);
+    setResult(`${label}…`);
+    const started = Date.now();
+    try {
+      await job();
+      setResult(`${label}: done in ${Date.now() - started} ms`);
+    } catch (err) {
+      const e = err as Error;
+      const code = err instanceof ImageError ? ` [${err.code}]` : '';
+      setResult(`${label} failed${code}: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** 6. Prepare the logo once, then print it three times from the cache. */
+  const printRepeated = async () => {
+    const t0 = Date.now();
+    const logo: MonochromeBitmap = await prepareImage(SAMPLE_LOGO, {
+      width: 240,
+      printableDots: paper === 80 ? 576 : 384,
+    });
+    const prepared = Date.now() - t0;
+    for (let i = 1; i <= 3; i++) {
+      await print(
+        new ReceiptBuilder({ paperWidth: paper })
+          .image(logo)
+          .text(`Copy ${i} of 3`, { align: 'center' })
+          .cut()
+          .build()
+      );
+    }
+    const stats = getImageCacheStats();
+    setResult(
+      `Logo prepared in ${prepared} ms, printed 3×. Cache: ${stats.entries} image(s), ${stats.bytes} bytes`
+    );
+  };
+
+  const disabled = busy || !isConnected;
+
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>Image Printing</Text>
+      <Text style={styles.subtitle}>
+        Logos print in black and white. Paper: {paper}mm (
+        {paper === 80 ? 576 : 384} dots).
+      </Text>
+
+      <View style={styles.buttonRow}>
+        <Button
+          title="58mm"
+          onPress={() => setPaper(58)}
+          color={paper === 58 ? '#007AFF' : '#aaa'}
+        />
+        <Button
+          title="80mm"
+          onPress={() => setPaper(80)}
+          color={paper === 80 ? '#007AFF' : '#aaa'}
+        />
+      </View>
+
+      <View style={styles.demoList}>
+        <Button
+          title="1. Logo at top"
+          disabled={disabled}
+          onPress={() => run('Logo at top', () => print(logoTopReceipt(paper)))}
+        />
+        <Button
+          title="2. Images between sections"
+          disabled={disabled}
+          onPress={() =>
+            run('Between sections', () => print(imageBetweenReceipt(paper)))
+          }
+        />
+        <Button
+          title="3. Backend JSON receipt"
+          disabled={disabled}
+          onPress={() =>
+            run('Backend JSON', () =>
+              print(JSON.parse(BACKEND_JSON) as ReceiptData)
+            )
+          }
+        />
+        <Button
+          title="4. Same logo 3× (cached)"
+          disabled={disabled}
+          onPress={() => run('Repeated logo', printRepeated)}
+        />
+      </View>
+
+      {busy && <ActivityIndicator style={styles.demoSpinner} />}
+      <Text style={styles.demoResult}>{result}</Text>
+    </View>
+  );
+}
+
 // ─── Helper component ─────────────────────────────────────────────────────────
 
 function Row({ label, value }: { label: string; value: string }) {
@@ -234,6 +396,7 @@ export default function App() {
             <Text style={styles.heading}>Receipt Printer — Live Demo</Text>
             <PermissionSection />
             <BluetoothSection />
+            <ImagePrintSection />
             <EventLog />
           </ScrollView>
         </View>
@@ -334,6 +497,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     marginBottom: 6,
+  },
+  demoList: {
+    marginTop: 12,
+    gap: 8,
+  },
+  demoSpinner: {
+    marginTop: 10,
+  },
+  demoResult: {
+    marginTop: 10,
+    fontSize: 12,
+    color: '#555',
   },
   logEntry: {
     flexDirection: 'row',
