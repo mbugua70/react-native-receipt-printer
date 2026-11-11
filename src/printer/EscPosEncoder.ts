@@ -1,3 +1,4 @@
+import { code128Bitmap } from './Code128';
 import { concatBytes, utf8Bytes } from './image/binary';
 import { ImageError } from './image/ImageError';
 import {
@@ -277,6 +278,11 @@ export type QrCodeLine = {
  *
  * - `height`   — bar height in dots (default 80 ≈ 10mm)
  * - `showText` — print the text under the bars (default: true)
+ * - `mode`     — `'native'` (default) sends the printer's own barcode
+ *                command (GS k). `'image'` draws the bars in the library and
+ *                prints them as an image, for printers whose firmware prints
+ *                unscannable barcodes; the text is then printed as a normal
+ *                text line. Follows the receipt's `imageMode`.
  *
  * Content that isn't printable ASCII, or too long to fit the paper at a
  * scannable bar width, is printed as plain centred text instead so the
@@ -287,7 +293,10 @@ export type BarcodeLine = {
   data: string;
   height?: number;
   showText?: boolean;
+  mode?: BarcodeMode;
 };
+
+export type BarcodeMode = 'native' | 'image';
 
 /**
  * An image, e.g. a logo — printed in black and white wherever it sits in
@@ -361,6 +370,20 @@ export function hasImageLines(data: ReceiptData): boolean {
   return data.lines.some((line) => line.type === 'image');
 }
 
+function isImageBarcode(line: ReceiptLine): line is BarcodeLine {
+  return line.type === 'barcode' && line.mode === 'image';
+}
+
+/**
+ * Whether the receipt carries raw image bytes — images, or barcodes drawn as
+ * images — and so must go through `encodeBytes()` rather than `encode()`.
+ */
+export function needsBinaryEncoding(data: ReceiptData): boolean {
+  return data.lines.some(
+    (line) => line.type === 'image' || isImageBarcode(line)
+  );
+}
+
 // ─── encode() — main function signature ──────────────────────────────────────
 //
 // Takes a ReceiptData object and returns a raw ESC/POS string ready to be
@@ -375,10 +398,10 @@ export function encode(data: ReceiptData): string {
     printableDots: getPrintableDots(data),
   };
 
-  if (hasImageLines(data)) {
+  if (needsBinaryEncoding(data)) {
     throw new ImageError(
       'NOT_PREPARED',
-      'encode() returns a text string and cannot carry image bytes. Use print(), or encodeBytes(await prepareReceipt(data)).'
+      'encode() returns a text string and cannot carry image bytes (images, or barcodes with mode "image"). Use print(), or encodeBytes(await prepareReceipt(data)).'
     );
   }
 
@@ -464,7 +487,42 @@ export function encodeBytes(data: ReceiptData): Uint8Array {
   const parts: Uint8Array[] = [];
   let text = '';
 
+  const flushText = () => {
+    if (text) {
+      parts.push(utf8Bytes(text));
+      text = '';
+    }
+  };
+
   for (const line of data.lines) {
+    if (isImageBarcode(line)) {
+      const content = line.data ?? '';
+      const bitmap = isCode128Printable(content)
+        ? code128Bitmap(
+            content,
+            printableDots,
+            line.height ?? BARCODE_DEFAULT_HEIGHT
+          )
+        : null;
+      if (!bitmap) {
+        // Same fallback as the native barcode: the code as centred text.
+        text += encodeLine({ ...line, mode: 'native' }, size, widthCfg);
+        continue;
+      }
+      flushText();
+      parts.push(
+        encodeImage(bitmap, {
+          align: 'center',
+          printableDots,
+          mode,
+          bandHeight,
+        })
+      );
+      if (line.showText ?? true) {
+        text += ALIGN_CENTER + content + LF + ALIGN_LEFT;
+      }
+      continue;
+    }
     if (line.type !== 'image') {
       text += encodeLine(line, size, widthCfg);
       continue;
@@ -475,10 +533,7 @@ export function encodeBytes(data: ReceiptData): Uint8Array {
         'Image line has not been prepared. Call prepareReceipt() before encodeBytes().'
       );
     }
-    if (text) {
-      parts.push(utf8Bytes(text));
-      text = '';
-    }
+    flushText();
     parts.push(
       encodeImage(line.source, {
         align: line.align ?? 'center',
@@ -488,7 +543,7 @@ export function encodeBytes(data: ReceiptData): Uint8Array {
       })
     );
   }
-  if (text) parts.push(utf8Bytes(text));
+  flushText();
 
   return concatBytes(parts);
 }

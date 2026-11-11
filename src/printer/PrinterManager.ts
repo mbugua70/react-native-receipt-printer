@@ -7,7 +7,7 @@ import {
 import {
   encode,
   encodeBytes,
-  hasImageLines,
+  needsBinaryEncoding,
   type ReceiptData,
 } from './EscPosEncoder';
 import { bytesToLatin1 } from './image/binary';
@@ -162,16 +162,17 @@ export function splitBytes(bytes: Uint8Array, chunkSize: number): Uint8Array[] {
 }
 
 /**
- * What gets written for one copy. Receipts without images keep the original
- * text path untouched; receipts with images are loaded first (so a bad image
- * fails before anything prints) and sent as latin1 strings, which the
- * Bluetooth library turns back into the exact bytes — no UTF-8 mangling.
+ * What gets written for one copy. Receipts without images or image-drawn
+ * barcodes keep the original text path untouched; the rest have their images
+ * loaded first (so a bad image fails before anything prints) and are sent as
+ * latin1 strings, which the Bluetooth library turns back into the exact
+ * bytes — no UTF-8 mangling.
  */
 async function buildPayloads(
   data: ReceiptData,
   chunkSize: number
 ): Promise<{ chunks: string[]; encoding?: 'latin1' }> {
-  if (!hasImageLines(data)) {
+  if (!needsBinaryEncoding(data)) {
     return { chunks: splitPayload(encode(data), chunkSize) };
   }
   const bytes = encodeBytes(await prepareReceipt(data));

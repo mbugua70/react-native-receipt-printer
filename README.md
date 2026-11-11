@@ -190,8 +190,9 @@ Options you can override on `.header()` and `.text()`:
 
 `.barcode(data)` prints a **Code 128** barcode — the 1D barcode used in
 shipping and logistics — centered, with the text printed under the bars.
-The printer draws it itself from the ESC/POS barcode command, so there are no
-images to generate.
+By default the printer draws it itself from the ESC/POS barcode command, so
+there are no images to generate. For printers whose own barcodes don't scan,
+`mode: 'image'` draws it in the library instead (see below).
 
 ```ts
 new ReceiptBuilder({ paperWidth: 58 })
@@ -229,6 +230,7 @@ centered text instead, so the code is still on the receipt.
 |---|---|---|
 | `height` | Bar height in printer dots (8 dots ≈ 1mm) | `80` (≈10mm) |
 | `showText` | Print the code under the bars | `true` |
+| `mode` | `'native'`: the printer draws the bars (`GS k`). `'image'`: the library draws them and prints an image — see below | `'native'` |
 
 In backend JSON, the same line looks like:
 
@@ -249,7 +251,52 @@ getBarcodeModuleDots('X'.repeat(20), 384); // 0 — won't fit 58mm
 
 > **Printer support:** Code 128 uses the standard ESC/POS `GS k` command,
 > which almost all thermal receipt printers support. A few very basic models
-> don't — print one test receipt on each new printer model.
+> don't — print one test receipt on each new printer model, and scan it. If
+> the bars don't scan, use `mode: 'image'`.
+
+#### Barcodes as images (`mode: 'image'`)
+
+Some printers accept `GS k` but print barcodes that won't scan. Common signs:
+the text under the bars starts with `{B` (the firmware prints the code-set
+prefix as part of the code), or the bars are far narrower than the paper
+allows. Built-in printers in some Android POS handhelds behave like this.
+
+With `mode: 'image'` the library draws the Code 128 itself and prints it as a
+black-and-white image, so it comes out the same on every printer that prints
+images:
+
+```ts
+new ReceiptBuilder({ paperWidth: 58 })
+  .barcode('52157681', { mode: 'image' })
+  .cut()
+  .build();
+```
+
+```json
+{ "type": "barcode", "data": "52157681", "mode": "image" }
+```
+
+- **Same options:** `height` and `showText` work as above. The text under the
+  bars is printed as a normal text line.
+- **Bars as wide as fit:** 3 dots per module when they fit, otherwise 2, with
+  a 10-module blank margin each side so scanners find the ends.
+- **Digits pack tighter:** an even number of digits uses code set C (two
+  digits per symbol), so the bars come out about twice as thick as for the
+  same number of letters.
+- **Follows `imageMode`:** use `imageMode: 'bitImage'` for printers that
+  don't print raster images.
+- **Same fallback:** content that won't fit at 2-dot bars, or isn't printable
+  ASCII, prints as centred text.
+- **Bytes:** a barcode image is about 3–4KB instead of ~20 bytes, and the
+  receipt is sent the same way as one with a logo. `encode()` can't carry it;
+  use `print()` or `encodeBytes()`.
+
+How much fits with `mode: 'image'`:
+
+| Paper | Even-length digits (`52157681`) | Anything else (`NRB-0660`) |
+|---|---|---|
+| 58mm | up to 24 (3-dot bars up to 12) | up to 12 (3-dot bars up to 6) |
+| 80mm | up to 42 (3-dot bars up to 24) | up to 21 (3-dot bars up to 12) |
 
 > **Upgrading apps:** versions before barcode support don't know the
 > `barcode` line type and print the word `undefined` in its place. Make sure

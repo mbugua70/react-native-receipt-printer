@@ -32,6 +32,7 @@ export {
   getBarcodeModuleDots,
   isCode128Printable,
   type BarcodeLine,
+  type BarcodeMode,
   type ImageLine,
   type ReceiptData,
   type ReceiptLine,

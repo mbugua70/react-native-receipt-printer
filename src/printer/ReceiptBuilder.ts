@@ -1,5 +1,6 @@
 import type {
   Align,
+  BarcodeMode,
   PaperWidth,
   PrinterProfile,
   ReceiptData,
@@ -45,6 +46,8 @@ type DividerOptions = {
 type BarcodeOptions = {
   height?: number;
   showText?: boolean;
+  /** 'native' (GS k, default) or 'image' — drawn by the library, for printers whose barcodes don't scan. */
+  mode?: BarcodeMode;
 };
 
 type ImageOptions = ImageProcessingOptions & {
