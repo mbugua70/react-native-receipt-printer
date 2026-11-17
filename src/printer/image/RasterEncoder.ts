@@ -8,6 +8,14 @@ type Align = 'left' | 'center' | 'right';
 /** Rows per `GS v 0` command. Small bands keep each write inside a printer's buffer. */
 export const DEFAULT_IMAGE_BAND_HEIGHT = 32;
 
+/**
+ * Most rows one `GS v 0` command can carry (its height is two bytes). Some
+ * printers need a whole image in one command: the A43 A4 printer overlaps
+ * the start of each new command with the end of the last one, so banded
+ * text prints with lines squeezed together or cut in half.
+ */
+export const MAX_IMAGE_BAND_HEIGHT = 65535;
+
 const ESC = 0x1b;
 const GS = 0x1d;
 const LF = 0x0a;
@@ -172,10 +180,14 @@ export function encodeImage(
       `Image is ${bitmap.width} dots wide but the paper prints at most ${printableDots}.`
     );
   }
-  if (!Number.isInteger(bandHeight) || bandHeight < 1 || bandHeight > 1024) {
+  if (
+    !Number.isInteger(bandHeight) ||
+    bandHeight < 1 ||
+    bandHeight > MAX_IMAGE_BAND_HEIGHT
+  ) {
     throw new ImageError(
       'INVALID_DIMENSIONS',
-      `imageBandHeight must be a whole number from 1 to 1024, got ${bandHeight}.`
+      `imageBandHeight must be a whole number from 1 to ${MAX_IMAGE_BAND_HEIGHT}, got ${bandHeight}.`
     );
   }
 
