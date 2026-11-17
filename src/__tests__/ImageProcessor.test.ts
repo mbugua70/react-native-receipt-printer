@@ -5,6 +5,7 @@ import {
   bytesPerRow,
   computeTargetSize,
   grayToMonochrome,
+  MAX_BITMAP_HEIGHT,
   MAX_IMAGE_HEIGHT,
   resizeGray,
   validateProcessingOptions,
@@ -198,6 +199,25 @@ describe('grayToMonochrome', () => {
 });
 
 describe('bitmapBytes', () => {
+  it('accepts a bitmap taller than a decoded image may be', () => {
+    const height = MAX_IMAGE_HEIGHT + 100;
+    const bytes = bitmapBytes({
+      width: 8,
+      height,
+      data: new Uint8Array(height),
+    });
+    expect(bytes.length).toBe(height);
+  });
+
+  it('rejects a bitmap taller than one image command can carry', () => {
+    const height = MAX_BITMAP_HEIGHT + 1;
+    expect(
+      code(() =>
+        bitmapBytes({ width: 8, height, data: new Uint8Array(height) })
+      )
+    ).toBe('TOO_LARGE');
+  });
+
   it('accepts base64 data of the right length', () => {
     const bytes = bitmapBytes({ width: 9, height: 1, data: 'gIA=' }); // 0x80 0x80
     expect(Array.from(bytes)).toEqual([0x80, 0x80]);

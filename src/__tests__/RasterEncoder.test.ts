@@ -3,6 +3,7 @@ import {
   alignOffset,
   encodeImage,
   padBitmap,
+  MAX_IMAGE_BAND_HEIGHT,
 } from '../printer/image/RasterEncoder';
 import { ImageError } from '../printer/image/ImageError';
 import type { MonochromeBitmap } from '../printer/image/types';
@@ -74,6 +75,20 @@ describe('GS v 0 raster command', () => {
     expect(() => encodeImage(solid(8, 1), { ...opts, bandHeight: 0 })).toThrow(
       ImageError
     );
+    expect(() =>
+      encodeImage(solid(8, 1), {
+        ...opts,
+        bandHeight: MAX_IMAGE_BAND_HEIGHT + 1,
+      })
+    ).toThrow(ImageError);
+  });
+
+  it('sends a tall image as one command when the band is that tall', () => {
+    // A whole A4 page in one GS v 0 — needed by printers that overlap
+    // consecutive image commands (the A43).
+    const out = encodeImage(solid(8, 2500), { ...opts, bandHeight: 2500 });
+    expect(out.length).toBe(3 + 8 + 2500);
+    expect(Array.from(out.subarray(9, 11))).toEqual([2500 & 0xff, 2500 >> 8]);
   });
 });
 

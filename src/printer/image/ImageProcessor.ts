@@ -9,8 +9,15 @@ import type {
 
 // ─── Limits ───────────────────────────────────────────────────────────────────
 
-/** Tallest image we'll print, in dots (≈ 51cm at 203 DPI). */
+/** Tallest image we'll decode and print, in dots (≈ 51cm at 203 DPI). */
 export const MAX_IMAGE_HEIGHT = 4096;
+
+/**
+ * Tallest ready-made `MonochromeBitmap` we accept, in dots: the most rows one
+ * `GS v 0` command can carry. A bitmap needs no decoding, so it can be a
+ * whole drawn page (an A4 loading sheet) rather than a logo.
+ */
+export const MAX_BITMAP_HEIGHT = 65535;
 
 /** Widest printable area we accept for any printer, in dots. */
 export const MAX_PRINTABLE_DOTS = 2048;
@@ -309,10 +316,10 @@ export function bitmapBytes(bitmap: MonochromeBitmap): Uint8Array {
   const { width, height } = bitmap;
   checkDimension('bitmap width', width);
   checkDimension('bitmap height', height);
-  if (height > MAX_IMAGE_HEIGHT) {
+  if (height > MAX_BITMAP_HEIGHT) {
     throw new ImageError(
       'TOO_LARGE',
-      `Bitmap is ${height} dots tall; the limit is ${MAX_IMAGE_HEIGHT}.`
+      `Bitmap is ${height} dots tall; the limit is ${MAX_BITMAP_HEIGHT}.`
     );
   }
 
